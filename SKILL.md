@@ -218,17 +218,19 @@ The board as a chat message. It is for a monitor session kept open in its own
 window: a session link in chat opens that session, which a link on the board
 page cannot do inside the app.
 
-First one line, `<N> on you · <M> on a run · checked <HH:MM>`, then:
+First one line, `**<N> on you** · <M> on a run · checked <HH:MM>` (no bold when
+N is 0: `Nothing on you · ...`), then:
 
 | | Session | What it needs |
 |---|---|---|
-| on you | `[<title>](#<session id>)` | `what` · `then` · how long it has waited |
-| on a run | `[<title>](#<session id>)` | `what` · `then` |
+| 🔴 **on you** | `**[<title>](#<session id>)**` | `what` · `then` · how long it has waited |
+| 🟡 on a run | `[<title>](#<session id>)` | `what` · `then` |
 | working | `[<title>](#<session id>)` | `what` |
 | idle | `[<title>](#<session id>)` | `what` |
 
 One row per Active session, in that order of states, the newest first within
-a state. Under the table, one line each, only when true: jobs that ended in
+a state. Only "on you" rows are bold, and only "on you" and "on a run" rows
+carry a dot, so the rows that need the user stand out from the rest. Under the table, one line each, only when true: jobs that ended in
 the last hour which no row has recorded; and `cluster unreadable since HH:MM`
 when `cluster_ok_at` is more than three minutes old or absent (the poller runs
 in the user's terminal: `~/.claude/skills/monitor/poller.sh <state folder>`).
