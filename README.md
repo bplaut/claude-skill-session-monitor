@@ -154,7 +154,17 @@ in it.
 |---|---|
 | `/monitor` | Re-checks every session and prints the board. Starts the monitor if it stopped. |
 | `/monitor done <part of a title>` | Sets that session's row aside until the session next speaks. |
+| `/monitor chat on` / `/monitor chat off` | Turns the chat board on or off. It is off to begin with. |
 | `/monitor stop` | Stops the monitor. The board says so. |
+
+### A board inside the app
+
+The app does not let a web page open a session, so the board page's links only
+work from a browser. Chat links do work in the app. To keep a clickable board
+inside it, open the monitor session in its own window (right-click it in the
+sidebar) and type `/monitor chat on`: the monitor then prints the board in
+chat each time a row changes, with each title a link that switches the main
+window to that session.
 
 ## Updating
 
