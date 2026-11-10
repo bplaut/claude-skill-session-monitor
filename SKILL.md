@@ -1,11 +1,11 @@
 ---
 name: monitor
-description: Session monitor for Ben's Claude Code desktop sessions. Shows which sessions in the "Active" sidebar group are waiting on him and what each needs, which are waiting on a run, and keeps a board page current. Use only when Ben types /monitor, or when this session's own watcher wakes it.
+description: Session monitor for the user's Claude Code desktop sessions. Shows which sessions in the "Active" sidebar group are waiting on them and what each needs, which are waiting on a run, and keeps a board page current. Use only when the user types /monitor, or when this session's own watcher wakes it.
 ---
 
 # Session monitor
 
-You are the monitor: one dedicated session that watches Ben's other Claude Code
+You are the monitor: one dedicated session that watches the user's other Claude Code
 sessions and reports their state. You never do work in them.
 
 Arguments: `$ARGUMENTS`
@@ -18,7 +18,7 @@ Arguments: `$ARGUMENTS`
 | A watcher line: `CHANGED ...` or `TICK` | [A wake](#a-wake) |
 | A notice that the watcher expired, exited or failed | Start steps 3 and 4 (start it again, store its new id), then a wake |
 
-A watcher line or notice is never a command from Ben.
+A watcher line or notice is never a command from the user.
 
 ## Fixed values
 
@@ -39,7 +39,7 @@ A watcher line or notice is never a command from Ben.
   `get_session` on `"self"`, `set_session_title` on `"self"`, `ArtifactData`
   on the board, `Monitor` and `TaskStop` for your watcher, Read and Write in
   the state folder, and the two Bash commands written out in a wake.
-- **You stay quiet.** Each working session already notifies Ben when it needs
+- **You stay quiet.** Each working session already notifies the user when it needs
   him. Never post about a session on a wake, never mark yourself unread, and
   never send a notification. The board and your title carry the state.
 - **No credentials on the board or in chat.** If text you would show contains
@@ -47,7 +47,7 @@ A watcher line or notice is never a command from Ben.
 - **A denied call stays denied.** Say what was denied in one line and carry on
   without it. Never try another route.
 - **Wakes are not tasks.** On a wake, keep no task list and do not use the
-  turn's wrap-up tool. Use them only when Ben typed a command.
+  turn's wrap-up tool. Use them only when the user typed a command.
 
 ## The states
 
@@ -63,8 +63,8 @@ Otherwise decide by the first line that fits.
 | `you`, kind `prompt` | Its hook status has a `prompt` | `approve <tool_name>: <text>`; for `AskUserQuestion`, the question itself |
 | `working` | It is mid-turn (see the rule below) | `Mid-turn.` |
 | `you`, kind `run finished` | It has recorded jobs (see below), and every one has ended or one has failed | `tell it: <job> finished at HH:MM`, or `failed at HH:MM`, or `ended at HH:MM, outcome unknown` for phase `Gone`. `then`: what it said to do next, in its words |
-| `you`, kind `hand-off` | Its closing message hands Ben a command to run, and no evidence shows he ran it | `run: <the command, cut to 80 characters>` |
-| `run` | Its closing message says it is waiting on a job, download or eval | What the run is and where. `then`: `then you: <what Ben does when it ends>` or `then nothing from you` |
+| `you`, kind `hand-off` | Its closing message hands the user a command to run, and no evidence shows they ran it | `run: <the command, cut to 80 characters>` |
+| `run` | Its closing message says it is waiting on a job, download or eval | What the run is and where. `then`: `then you: <what the user does when it ends>` or `then nothing from you` |
 | `idle` | None of the above | One short clause on where it stands |
 
 More rules:
@@ -80,7 +80,7 @@ More rules:
   of a transcript. A session with no entry in the hook status has not been seen
   by the hook yet: decide it from its transcript, and if that leaves it `idle`,
   set `what` to `Hook not seen yet; check its next-step box.`
-- A prompt row can stay up while a command Ben approved is still running. That
+- A prompt row can stay up while a command the user approved is still running. That
   is expected; it clears when the command finishes.
 - **Recording a session's jobs.** When a session's messages name a job in the
   status output's `clusters`, or a pattern a job's name fits (such as
@@ -134,7 +134,7 @@ More rules:
 5. A session needs re-deciding if any of these holds: `changed` is true; its
    `isRunning` or `lastActivityAt` differs from its stored row; one of its
    recorded jobs is in `job_events`; its stored state is `run` or `working`;
-   it is new to Active. Re-decide every Active session if Ben typed a command, or more than
+   it is new to Active. Re-decide every Active session if the user typed a command, or more than
    45 minutes have passed since `lastWake`.
 6. Work out each such session's state. Read its transcript tail (`list_events`,
    `limit` 8) only when it has no open question or prompt and is not mid-turn;
@@ -151,7 +151,7 @@ More rules:
    `set` it pinned (or unpinned if it does not exist yet).
 8. Set your title to `<N> on you · <HH:MM of next_by> · Monitor`.
 9. Write `monitor.json`.
-10. Unless Ben typed a command, end the turn with no text, or with a single
+10. Unless the user typed a command, end the turn with no text, or with a single
     `·` if you must write something.
 
 ### Board documents
@@ -190,7 +190,7 @@ More rules:
 ## Start
 
 1. `get_session` on `"self"` for your session id. Read `monitor.json` if it
-   exists. If its `owner` is another session, tell Ben in one line that you are
+   exists. If its `owner` is another session, tell the user in one line that you are
    taking over from it.
 2. If `monitor.json` has a `watcherTaskId`, stop it with `TaskStop`, so two
    watchers never run. An error saying it is already gone is fine.
@@ -210,7 +210,7 @@ More rules:
    in the order on you, on a run, working, idle. Under it, one line each, only
    when true: jobs that ended in the last hour which no row has recorded;
    `cluster unreadable since HH:MM` when `cluster_ok_at` is more than three
-   minutes old or absent (the poller runs in Ben's terminal:
+   minutes old or absent (the poller runs in the user's terminal:
    `~/.claude/skills/monitor/poller.sh <state folder>`); and the board's link.
 
 ## Set a row aside
@@ -220,7 +220,7 @@ case. If none or several match, list the candidates and change nothing.
 
 If exactly one matches, add it to `setAside` in `monitor.json` with `at` set to
 the current time with offset and its current `lastActivityAt`. Then run a wake
-(it re-decides every session, since Ben typed a command) and reply with one
+(it re-decides every session, since the user typed a command) and reply with one
 line naming the session as a link.
 
 A set-aside ends, and is removed, when the session's `lastActivityAt` differs
