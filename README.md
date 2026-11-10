@@ -18,7 +18,8 @@ are working or idle.
    grows, and every 20 minutes.
 4. **`SKILL.md`** is the `/monitor` procedure the monitor session follows on
    each wake: read the state with `monitor_lib.py status`, decide each
-   session's row, and write changed rows to the board.
+   session's row, write changed rows to the board, and print the board in
+   chat when a row changed.
 5. **`board.html`** is the board page. The monitor writes rows into its
    database and the open page redraws itself.
 
@@ -127,8 +128,8 @@ mid-tier model is enough. Then type:
 /monitor
 ```
 
-It replies with the board as a table. From then on it runs by itself and says
-nothing in chat.
+It replies with the board as a table. From then on it runs by itself, and
+prints the table again each time a row changes.
 
 ### 8. Open the board
 
@@ -154,16 +155,15 @@ in it.
 |---|---|
 | `/monitor` | Re-checks every session and prints the board. Starts the monitor if it stopped. |
 | `/monitor done <part of a title>` | Sets that session's row aside until the session next speaks. |
-| `/monitor chat on` / `/monitor chat off` | Turns the chat board on or off. It is off to begin with. |
 | `/monitor stop` | Stops the monitor. The board says so. |
 
 ### A board inside the app
 
 The app does not let a web page open a session, so the board page's links only
-work from a browser. Chat links do work in the app. To keep a clickable board
-inside it, open the monitor session in its own window (right-click it in the
-sidebar) and type `/monitor chat on`: the monitor then prints the board in
-chat each time a row changes, with each title a link that switches the main
+work from a browser. Chat links do work in the app, and the monitor prints the
+board in chat each time a row changes. To keep a clickable board inside the
+app, open the monitor session in its own window (right-click it in the
+sidebar): each title in its latest table is a link that switches the main
 window to that session.
 
 ## Updating

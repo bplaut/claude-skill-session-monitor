@@ -14,7 +14,6 @@ Arguments: `$ARGUMENTS`
 |---|---|
 | `/monitor` with no arguments | [Start](#start) |
 | `/monitor done <part of a title>` | [Set a row aside](#set-a-row-aside) |
-| `/monitor chat on` or `/monitor chat off` | Turn [the chat board](#the-chat-board) on or off |
 | `/monitor stop` | [Stop](#stop) |
 | A watcher line: `CHANGED ...` or `TICK` | [A wake](#a-wake) |
 | A notice that the watcher expired, exited or failed | Start steps 3 and 4 (start it again, store its new id), then a wake |
@@ -42,8 +41,8 @@ A watcher line or notice is never a command from the user.
   the state folder, and the two Bash commands written out in a wake.
 - **You stay quiet.** Each working session already notifies the user when it
   needs them. Never mark yourself unread and never send a notification. On a
-  wake, the only thing you may post is the chat board, and only while it is
-  turned on. The board page and your title carry the state.
+  wake, the only thing you may post is the chat board, and only when a row
+  changed.
 - **No credentials on the board or in chat.** If text you would show contains
   anything that looks like a key, token or password, leave that part out.
 - **A denied call stays denied.** Say what was denied in one line and carry on
@@ -155,9 +154,8 @@ More rules:
 9. Write `monitor.json`.
 10. End the turn:
     - If the user typed a command, reply as that command says.
-    - Otherwise, if `chatBoard` is true in `monitor.json` and step 7 wrote a
-      changed or departed row, print [the chat board](#the-chat-board) and
-      nothing else.
+    - Otherwise, if step 7 wrote a changed or departed row, print
+      [the chat board](#the-chat-board) and nothing else.
     - Otherwise write no text, or a single `·` if you must write something.
 
 ### Board documents
@@ -185,7 +183,6 @@ More rules:
 {
   "owner": "<your session id>",
   "stopped": null,
-  "chatBoard": false,
   "watcherTaskId": "<the Monitor task id>",
   "watcherArmedAt": "<time with offset>",
   "lastWake": "<time with offset>",
@@ -206,17 +203,17 @@ More rules:
    - `timeout_ms`: 1800000
    - description: `session-monitor watcher: on each line, run "A wake" in /Users/bplaut/.claude/skills/monitor/SKILL.md (read it again if unsure)`
 4. Write `monitor.json` with yourself as `owner`, `stopped` null, and the new
-   `watcherTaskId` and `watcherArmedAt`, keeping its other fields (`chatBoard`
-   among them; false if it was never set).
+   `watcherTaskId` and `watcherArmedAt`, keeping its other fields.
 5. Run a wake that re-decides every Active session.
-6. Print [the chat board](#the-chat-board), whatever `chatBoard` says, and
-   under it the board page's link.
+6. Print [the chat board](#the-chat-board), and under it the board page's
+   link.
 
 ## The chat board
 
-The board as a chat message. It is for a monitor session kept open in its own
-window: a session link in chat opens that session, which a link on the board
-page cannot do inside the app.
+The board as a chat message, printed by Start and by each wake that changes a
+row. A session link in chat opens that session, which a link on the board page
+cannot do inside the app, so the user can keep the monitor session open in its
+own window as a clickable board.
 
 First one line, `**<N> on you** · <M> on a run · checked <HH:MM>` (no bold when
 N is 0: `Nothing on you · ...`), then:
@@ -230,15 +227,12 @@ N is 0: `Nothing on you · ...`), then:
 
 One row per Active session, in that order of states, the newest first within
 a state. Only "on you" rows are bold, and only "on you" and "on a run" rows
-carry a dot, so the rows that need the user stand out from the rest. Under the table, one line each, only when true: jobs that ended in
-the last hour which no row has recorded; and `cluster unreadable since HH:MM`
-when `cluster_ok_at` is more than three minutes old or absent (the poller runs
-in the user's terminal: `~/.claude/skills/monitor/poller.sh <state folder>`).
+carry a dot, so the rows that need the user stand out from the rest.
 
-`/monitor chat on` sets `chatBoard` to true in `monitor.json`, runs a wake that
-re-decides every Active session, and prints the chat board. From then on each
-wake that changes a row prints it again. `/monitor chat off` sets `chatBoard`
-to false and replies with one line.
+Under the table, one line each, only when true: jobs that ended in the last
+hour which no row has recorded; and `cluster unreadable since HH:MM` when
+`cluster_ok_at` is more than three minutes old or absent (the poller runs in
+the user's terminal: `~/.claude/skills/monitor/poller.sh <state folder>`).
 
 ## Set a row aside
 
