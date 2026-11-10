@@ -39,14 +39,16 @@ sandboxed sessions cannot edit. Copy, never symlink:
 cd ~/review-loop/session-monitor && mkdir -p ~/.claude/skills/monitor && cp SKILL.md board.html hook.py monitor_lib.py poller.sh watch.py ~/.claude/skills/monitor/
 ```
 
-Add the hook entries in `settings-hooks.json` to `~/.claude/settings.json`.
-Back the file up first, and append to arrays that already exist; a JSON error
-there stops every hook from loading. Then check it parses and that your
-existing hooks are still listed:
+Add the hook entries in `settings-hooks.json` to `~/.claude/settings.json`:
 
 ```bash
-python3 -m json.tool ~/.claude/settings.json > /dev/null && echo ok
+/usr/bin/python3 ~/review-loop/session-monitor/merge_hooks.py ~/.claude/settings.json
 ```
+
+It appends them after the hooks you already have, keeps the previous file as
+`settings.json.before-monitor`, and changes nothing if the file does not parse
+or the entries are already there. To uninstall, copy that file back and delete
+`~/.claude/skills/monitor`.
 
 The state folder in those entries and in `SKILL.md` must be the one the poller
 is given.
