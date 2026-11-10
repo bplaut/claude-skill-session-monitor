@@ -1,0 +1,71 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__ccd_turn__wrap_up$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bplaut/.claude/skills/monitor/hook.py /Users/bplaut/eval-awareness/playground/session-monitor/state",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}
