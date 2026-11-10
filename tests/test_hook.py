@@ -68,6 +68,16 @@ class Hook(unittest.TestCase):
         self.assert_silent_success(run_hook(self.state, {"hook_event_name": "PostToolUse", "tool_name": "Write"}))
         self.assertEqual([r["kind"] for r in records(self.state)], ["request", "waiting", "resolved"])
 
+    def test_another_agents_tool_call_leaves_the_prompt_open(self):
+        run_hook(self.state, {"hook_event_name": "PermissionRequest", "tool_name": "Write", "tool_input": {"file_path": "/x/y.txt"}, "agent_id": "a1"})
+        run_hook(self.state, {"hook_event_name": "Notification", "notification_type": "permission_prompt"})
+        self.assert_silent_success(run_hook(self.state, {"hook_event_name": "PostToolUse", "tool_name": "Read", "agent_id": "b2"}))
+        self.assert_silent_success(run_hook(self.state, {"hook_event_name": "PostToolUse", "tool_name": "Write"}))
+        self.assertEqual([r["kind"] for r in records(self.state)], ["request", "waiting"])
+        self.assertEqual(records(self.state)[1]["agent_id"], "a1")
+        run_hook(self.state, {"hook_event_name": "PostToolUse", "tool_name": "Write", "agent_id": "a1"})
+        self.assertEqual(records(self.state)[-1]["kind"], "resolved")
+
     def test_a_tool_call_with_no_open_prompt_writes_nothing(self):
         run_hook(self.state, BOX)
         self.assert_silent_success(run_hook(self.state, {"hook_event_name": "PostToolUse", "tool_name": "Bash"}))

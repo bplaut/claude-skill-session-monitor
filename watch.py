@@ -29,15 +29,21 @@ def main(argv):
     poll = float(argv[2]) if len(argv) > 2 else 15.0
     tick = float(argv[3]) if len(argv) > 3 else 1200.0
 
-    announced = []
+    offsets_path = os.path.join(state, "offsets.json")
+    announced = None
     next_tick = time.monotonic() + tick
     while True:
         pending = monitor_lib.pending_changes(state)
-        # Say each set of changes once. The monitor may be mid-turn and unable
-        # to read them yet; repeating the line would only queue more wakes.
-        if pending and pending != announced:
+        try:
+            read_at = os.path.getmtime(offsets_path)
+        except FileNotFoundError:
+            read_at = None
+        # Say each set of changes once per read by the monitor. While it is
+        # mid-turn it cannot read them, and repeating the line would only queue
+        # more wakes; once it has read, the same file growing again is news.
+        if pending and (pending, read_at) != announced:
             print("CHANGED " + " ".join(pending), flush=True)
-        announced = pending
+        announced = (pending, read_at)
         if time.monotonic() >= next_tick:
             print("TICK", flush=True)
             next_tick = time.monotonic() + tick

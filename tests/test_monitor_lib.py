@@ -4,6 +4,7 @@ Run with the same interpreter the hook uses:
     /usr/bin/python3 -m unittest discover -s tests
 """
 
+import datetime
 import json
 import os
 import sys
@@ -29,9 +30,21 @@ def box(ask=None, **extra):
     }
 
 
+def request(tool="Write", text="plan.md", agent=None):
+    return {"kind": "request", "tool_name": tool, "text": text, "agent_id": agent}
+
+
+def waiting(tool="Write", text="plan.md", agent=None):
+    return {"kind": "waiting", "tool_name": tool, "text": text, "agent_id": agent}
+
+
+def resolved(tool="Write", agent=None):
+    return {"kind": "resolved", "tool_name": tool, "agent_id": agent}
+
+
 class RecordFor(unittest.TestCase):
     def test_box_with_a_question(self):
-        record = monitor_lib.record_for(box("Run it again?"), last_kind=None)
+        record = monitor_lib.record_for(box("Run it again?"), [])
         self.assertEqual(record["kind"], "box")
         self.assertEqual(record["ask"], "Run it again?")
         self.assertEqual(record["actions"], ["Yes", "No"])
@@ -39,14 +52,14 @@ class RecordFor(unittest.TestCase):
         self.assertFalse(record["blocked"])
 
     def test_box_without_a_question_has_ask_none(self):
-        record = monitor_lib.record_for(box(), last_kind=None)
+        record = monitor_lib.record_for(box(), [])
         self.assertEqual(record["kind"], "box")
         self.assertIsNone(record["ask"])
         self.assertEqual(record["actions"], [])
 
     def test_other_pretooluse_tools_write_nothing(self):
         event = {"hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_turn__update_plan", "tool_input": {}}
-        self.assertIsNone(monitor_lib.record_for(event, last_kind=None))
+        self.assertIsNone(monitor_lib.record_for(event, []))
 
     def test_permission_request_keeps_only_the_first_word_of_a_command(self):
         event = {
@@ -54,10 +67,11 @@ class RecordFor(unittest.TestCase):
             "tool_name": "Bash",
             "tool_input": {"command": "HF_TOKEN=abc123 uv run publish data/x"},
         }
-        record = monitor_lib.record_for(event, last_kind=None)
+        record = monitor_lib.record_for(event, [])
         self.assertEqual(record["kind"], "request")
         self.assertEqual(record["tool_name"], "Bash")
         self.assertEqual(record["text"], "uv")
+        self.assertIsNone(record["agent_id"])
         self.assertNotIn("abc123", json.dumps(record))
 
     def test_permission_request_for_a_file_tool_names_the_file(self):
@@ -66,7 +80,7 @@ class RecordFor(unittest.TestCase):
             "tool_name": "Write",
             "tool_input": {"file_path": "/Users/x/notes/plan.md", "content": "secret body"},
         }
-        record = monitor_lib.record_for(event, last_kind=None)
+        record = monitor_lib.record_for(event, [])
         self.assertEqual(record["text"], "plan.md")
         self.assertNotIn("secret body", json.dumps(record))
 
@@ -76,73 +90,113 @@ class RecordFor(unittest.TestCase):
             "tool_name": "AskUserQuestion",
             "tool_input": {"questions": [{"question": "Which cue?", "options": []}, {"question": "Second?"}]},
         }
-        record = monitor_lib.record_for(event, last_kind=None)
-        self.assertEqual(record["text"], "Which cue?")
+        self.assertEqual(monitor_lib.record_for(event, [])["text"], "Which cue?")
 
-    def test_only_the_permission_prompt_notification_is_waiting(self):
-        waiting = {"hook_event_name": "Notification", "notification_type": "permission_prompt"}
+    def test_odd_tool_input_shapes_do_not_raise(self):
+        for tool_input in (None, "text", [], {"questions": []}, {"questions": ["x"]}, {"command": None}):
+            event = {"hook_event_name": "PermissionRequest", "tool_name": "AskUserQuestion", "tool_input": tool_input}
+            self.assertEqual(monitor_lib.record_for(event, [])["text"], "", tool_input)
+
+    def test_waiting_takes_its_text_from_the_latest_request(self):
+        event = {"hook_event_name": "Notification", "notification_type": "permission_prompt"}
+        recent = [request("Bash", "ls"), request("Write", "plan.md", agent="a1")]
+        record = monitor_lib.record_for(event, recent)
+        self.assertEqual((record["kind"], record["tool_name"], record["text"], record["agent_id"]), ("waiting", "Write", "plan.md", "a1"))
+
+    def test_other_notifications_write_nothing(self):
         idle = {"hook_event_name": "Notification", "notification_type": "idle_prompt"}
-        self.assertEqual(monitor_lib.record_for(waiting, last_kind="request")["kind"], "waiting")
-        self.assertIsNone(monitor_lib.record_for(idle, last_kind="stop"))
+        self.assertIsNone(monitor_lib.record_for(idle, [request()]))
 
-    def test_posttooluse_resolves_only_an_open_prompt(self):
+    def test_a_tool_call_resolves_only_the_prompt_it_answers(self):
+        open_prompt = [request("Write", agent="a1"), waiting("Write", agent="a1")]
+        same = {"hook_event_name": "PostToolUse", "tool_name": "Write", "agent_id": "a1"}
+        record = monitor_lib.record_for(same, open_prompt)
+        self.assertEqual((record["kind"], record["tool_name"], record["agent_id"]), ("resolved", "Write", "a1"))
+        other_agent = {"hook_event_name": "PostToolUse", "tool_name": "Write", "agent_id": "b2"}
+        main_thread = {"hook_event_name": "PostToolUse", "tool_name": "Write"}
+        other_tool = {"hook_event_name": "PostToolUse", "tool_name": "Read", "agent_id": "a1"}
+        for event in (other_agent, main_thread, other_tool):
+            self.assertIsNone(monitor_lib.record_for(event, open_prompt), event)
+
+    def test_a_tool_call_with_no_open_prompt_writes_nothing(self):
         event = {"hook_event_name": "PostToolUse", "tool_name": "Write"}
-        self.assertEqual(monitor_lib.record_for(event, last_kind="waiting")["kind"], "resolved")
-        self.assertIsNone(monitor_lib.record_for(event, last_kind="request"))
-        self.assertIsNone(monitor_lib.record_for(event, last_kind=None))
+        self.assertIsNone(monitor_lib.record_for(event, []))
+        self.assertIsNone(monitor_lib.record_for(event, [request()]))
+        self.assertIsNone(monitor_lib.record_for(event, [request(), waiting(), resolved()]))
 
     def test_stop_and_reply(self):
-        self.assertEqual(monitor_lib.record_for({"hook_event_name": "Stop"}, None)["kind"], "stop")
+        self.assertEqual(monitor_lib.record_for({"hook_event_name": "Stop"}, [])["kind"], "stop")
         reply = {"hook_event_name": "UserPromptSubmit", "prompt": "yes, go ahead"}
-        self.assertEqual(monitor_lib.record_for(reply, None)["kind"], "reply")
+        self.assertEqual(monitor_lib.record_for(reply, [])["kind"], "reply")
 
-    def test_an_automated_prompt_is_not_a_reply(self):
+    def test_an_automated_or_empty_prompt_is_not_a_reply(self):
         for prompt in (
             "<task-notification>\n<task-id>b0</task-id>",
             "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated",
             "  <task-notification>",
+            "",
+            None,
         ):
             event = {"hook_event_name": "UserPromptSubmit", "prompt": prompt}
-            self.assertIsNone(monitor_lib.record_for(event, None), prompt)
+            self.assertIsNone(monitor_lib.record_for(event, []), prompt)
 
     def test_a_subagent_writes_only_prompt_records(self):
-        self.assertIsNone(monitor_lib.record_for(dict(box("Q?"), agent_id="a1"), None))
-        self.assertIsNone(monitor_lib.record_for({"hook_event_name": "Stop", "agent_id": "a1"}, None))
-        request = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "ls"}, "agent_id": "a1"}
-        self.assertEqual(monitor_lib.record_for(request, None)["kind"], "request")
-        resolved = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "agent_id": "a1"}
-        self.assertEqual(monitor_lib.record_for(resolved, "waiting")["kind"], "resolved")
+        self.assertIsNone(monitor_lib.record_for(dict(box("Q?"), agent_id="a1"), []))
+        self.assertIsNone(monitor_lib.record_for({"hook_event_name": "Stop", "agent_id": "a1"}, []))
+        self.assertIsNone(monitor_lib.record_for({"hook_event_name": "UserPromptSubmit", "prompt": "x", "agent_id": "a1"}, []))
+        event = {"hook_event_name": "PermissionRequest", "tool_name": "Bash", "tool_input": {"command": "ls"}, "agent_id": "a1"}
+        self.assertEqual(monitor_lib.record_for(event, [])["agent_id"], "a1")
 
     def test_unknown_events_write_nothing(self):
-        self.assertIsNone(monitor_lib.record_for({"hook_event_name": "SessionStart"}, None))
-        self.assertIsNone(monitor_lib.record_for({}, None))
+        self.assertIsNone(monitor_lib.record_for({"hook_event_name": "SessionStart"}, []))
+        self.assertIsNone(monitor_lib.record_for({}, []))
+
+
+class EncodeRecord(unittest.TestCase):
+    def test_a_long_recap_is_cut(self):
+        line = monitor_lib.encode_record({"kind": "box", "ask": "Go?", "actions": ["Yes"], "recap": "x" * 20000})
+        self.assertLessEqual(len(line), monitor_lib.RECORD_LIMIT)
+        self.assertEqual(json.loads(line)["ask"], "Go?")
+
+    def test_text_that_escapes_to_many_bytes_still_fits(self):
+        record = {"kind": "box", "ask": "\U0001f600" * 300, "actions": ["\U0001f600" * 60] * 2, "recap": "\U0001f600" * 500}
+        line = monitor_lib.encode_record(record)
+        self.assertLessEqual(len(line), monitor_lib.RECORD_LIMIT)
+        self.assertEqual(json.loads(line)["kind"], "box")
 
 
 class OpenItems(unittest.TestCase):
-    def kinds(self, *records):
+    def items(self, *records):
         return monitor_lib.open_items([dict(r, ts="t%d" % i) for i, r in enumerate(records)])
 
     def test_a_question_is_open_until_a_reply(self):
         asked = {"kind": "box", "ask": "Go?", "actions": ["Yes"], "recap": "r", "blocked": False}
-        self.assertEqual(self.kinds(asked, {"kind": "stop"})["question"]["ask"], "Go?")
-        self.assertIsNone(self.kinds(asked, {"kind": "stop"}, {"kind": "reply"})["question"])
+        self.assertEqual(self.items(asked, {"kind": "stop"})["question"]["ask"], "Go?")
+        self.assertIsNone(self.items(asked, {"kind": "stop"}, {"kind": "reply"})["question"])
 
     def test_a_later_box_without_a_question_replaces_the_old_one(self):
         asked = {"kind": "box", "ask": "Go?", "actions": [], "recap": "r", "blocked": False}
         quiet = {"kind": "box", "ask": None, "actions": [], "recap": "r2", "blocked": False}
-        self.assertIsNone(self.kinds(asked, {"kind": "stop"}, quiet, {"kind": "stop"})["question"])
+        self.assertIsNone(self.items(asked, {"kind": "stop"}, quiet, {"kind": "stop"})["question"])
 
     def test_a_blocked_box_counts_as_a_question(self):
         blocked = {"kind": "box", "ask": None, "actions": [], "recap": "Stuck until you decide.", "blocked": True}
-        self.assertEqual(self.kinds(blocked)["question"]["recap"], "Stuck until you decide.")
+        self.assertEqual(self.items(blocked)["question"]["recap"], "Stuck until you decide.")
 
-    def test_a_prompt_is_open_only_while_waiting_is_the_last_record(self):
-        request = {"kind": "request", "tool_name": "Write", "text": "plan.md"}
-        open_now = self.kinds(request, {"kind": "waiting"})
-        self.assertEqual(open_now["prompt"]["tool_name"], "Write")
-        self.assertEqual(open_now["prompt"]["text"], "plan.md")
-        self.assertIsNone(self.kinds(request, {"kind": "waiting"}, {"kind": "resolved"})["prompt"])
-        self.assertIsNone(self.kinds(request)["prompt"])
+    def test_a_prompt_stays_open_through_other_traffic(self):
+        prompt = self.items(request(agent="a1"), waiting(agent="a1"), request("Bash", "ls", agent="b2"), box())["prompt"]
+        self.assertEqual((prompt["tool_name"], prompt["text"], prompt["ts"]), ("Write", "plan.md", "t1"))
+
+    def test_a_prompt_closes_on_its_own_resolution_a_turn_end_or_a_reply(self):
+        opened = (request(agent="a1"), waiting(agent="a1"))
+        self.assertIsNone(self.items(*opened, resolved(agent="a1"))["prompt"])
+        self.assertIsNone(self.items(*opened, {"kind": "stop"})["prompt"])
+        self.assertIsNone(self.items(*opened, {"kind": "reply"})["prompt"])
+        self.assertIsNotNone(self.items(*opened, resolved(agent="b2"))["prompt"])
+        self.assertIsNotNone(self.items(*opened, resolved("Read", agent="a1"))["prompt"])
+
+    def test_a_request_alone_is_not_a_prompt(self):
+        self.assertIsNone(self.items(request())["prompt"])
 
     def test_no_records(self):
         self.assertEqual(monitor_lib.open_items([]), {"question": None, "prompt": None})
@@ -157,11 +211,14 @@ class DiffJobs(unittest.TestCase):
             [("DONE", "a"), ("FAILED", "b"), ("NEW", "f")],
         )
 
+    def test_an_ended_name_that_comes_back_alive_is_a_new_job(self):
+        self.assertEqual(monitor_lib.diff_jobs({"a": "Completed", "b": "Gone"}, {"a": "Pending", "b": "Running"}), [("NEW", "a"), ("NEW", "b")])
+
     def test_a_running_job_that_vanishes_is_gone(self):
         self.assertEqual(monitor_lib.diff_jobs({"a": "Running"}, {}), [("GONE", "a")])
 
     def test_a_finished_job_that_vanishes_is_not_reported_again(self):
-        self.assertEqual(monitor_lib.diff_jobs({"a": "Completed", "b": "Failed"}, {}), [])
+        self.assertEqual(monitor_lib.diff_jobs({"a": "Completed", "b": "Failed", "c": "Gone"}, {}), [])
 
     def test_nothing_changes(self):
         self.assertEqual(monitor_lib.diff_jobs({"a": "Running"}, {"a": "Running"}), [])
@@ -176,31 +233,52 @@ class RecordJobs(unittest.TestCase):
         ]
         return json.dumps({"items": items})
 
+    def jobs(self, state):
+        with open(os.path.join(state, "jobs.json")) as f:
+            return json.load(f)["clusters"]["ctx"]
+
     def test_a_restart_reports_jobs_that_finished_while_it_was_down(self):
         with tempfile.TemporaryDirectory() as state:
-            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running", b="Running"), now="2026-11-10T10:00:00")
-            monitor_lib.record_jobs(state, "ctx", self.listing(a="Completed"), now="2026-11-10T10:05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running", b="Running"), now="2026-11-10T10:00:00-05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Completed"), now="2026-11-10T10:05:00-05:00")
             with open(os.path.join(state, "events.log")) as log:
                 lines = [line.split()[1:] for line in log]
             self.assertIn(["DONE", "ctx", "a"], lines)
             self.assertIn(["GONE", "ctx", "b"], lines)
-            with open(os.path.join(state, "jobs.json")) as f:
-                jobs = json.load(f)
-            self.assertEqual(jobs["clusters"]["ctx"]["okAt"], "2026-11-10T10:05:00")
-            self.assertEqual(jobs["clusters"]["ctx"]["jobs"]["a"]["phase"], "Completed")
+            self.assertEqual(self.jobs(state)["okAt"], "2026-11-10T10:05:00-05:00")
+
+    def test_an_ended_job_stays_listed_with_its_outcome_after_the_cluster_drops_it(self):
+        with tempfile.TemporaryDirectory() as state:
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running", b="Running"), now="2026-11-10T10:00:00-05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Completed"), now="2026-11-10T10:05:00-05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(), now="2026-11-10T10:20:00-05:00")
+            jobs = self.jobs(state)["jobs"]
+            self.assertEqual((jobs["a"]["phase"], jobs["a"]["endedAt"]), ("Completed", "2026-11-10T10:05:00-05:00"))
+            self.assertEqual((jobs["b"]["phase"], jobs["b"]["endedAt"]), ("Gone", "2026-11-10T10:05:00-05:00"))
+            with open(os.path.join(state, "events.log")) as log:
+                self.assertEqual(len(log.readlines()), 2)
+
+    def test_an_ended_job_is_forgotten_after_a_day(self):
+        with tempfile.TemporaryDirectory() as state:
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running"), now="2026-11-10T10:00:00-05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(), now="2026-11-10T10:05:00-05:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(), now="2026-11-11T10:04:00-05:00")
+            self.assertIn("a", self.jobs(state)["jobs"])
+            monitor_lib.record_jobs(state, "ctx", self.listing(), now="2026-11-11T10:06:00-05:00")
+            self.assertEqual(self.jobs(state)["jobs"], {})
 
     def test_the_first_listing_reports_nothing_as_new(self):
         with tempfile.TemporaryDirectory() as state:
-            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running"), now="2026-11-10T10:00:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running"), now="2026-11-10T10:00:00-05:00")
             self.assertFalse(os.path.exists(os.path.join(state, "events.log")))
 
     def test_bad_kubectl_output_leaves_ok_at_unchanged(self):
         with tempfile.TemporaryDirectory() as state:
-            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running"), now="2026-11-10T10:00:00")
-            with self.assertRaises(ValueError):
-                monitor_lib.record_jobs(state, "ctx", "error: You must be logged in", now="2026-11-10T10:05:00")
-            with open(os.path.join(state, "jobs.json")) as f:
-                self.assertEqual(json.load(f)["clusters"]["ctx"]["okAt"], "2026-11-10T10:00:00")
+            monitor_lib.record_jobs(state, "ctx", self.listing(a="Running"), now="2026-11-10T10:00:00-05:00")
+            for bad in ("error: You must be logged in", "[]", '{"items": [{"metadata": {}}]}'):
+                with self.assertRaises(ValueError):
+                    monitor_lib.record_jobs(state, "ctx", bad, now="2026-11-10T10:05:00-05:00")
+            self.assertEqual(self.jobs(state)["okAt"], "2026-11-10T10:00:00-05:00")
 
 
 class Status(unittest.TestCase):
@@ -230,9 +308,45 @@ class Status(unittest.TestCase):
     def test_job_events_are_reported_once(self):
         with tempfile.TemporaryDirectory() as state:
             with open(os.path.join(state, "events.log"), "w") as f:
-                f.write("2026-11-10T10:05:00 DONE ctx job-a\n")
-            self.assertEqual(monitor_lib.status(state)["job_events"], [{"ts": "2026-11-10T10:05:00", "event": "DONE", "cluster": "ctx", "job": "job-a"}])
+                f.write("2026-11-10T10:05:00-05:00 DONE ctx job-a\n")
+            expected = [{"ts": "2026-11-10T10:05:00-05:00", "event": "DONE", "cluster": "ctx", "job": "job-a"}]
+            self.assertEqual(monitor_lib.status(state)["job_events"], expected)
             self.assertEqual(monitor_lib.status(state)["job_events"], [])
+
+    def test_an_events_log_that_was_replaced_by_a_shorter_one_is_read_from_its_start(self):
+        with tempfile.TemporaryDirectory() as state:
+            path = os.path.join(state, "events.log")
+            with open(path, "w") as f:
+                f.write("2026-11-10T10:05:00-05:00 DONE ctx job-a\n2026-11-10T10:06:00-05:00 DONE ctx job-b\n")
+            monitor_lib.status(state)
+            with open(path, "w") as f:
+                f.write("2026-11-10T11:00:00-05:00 FAILED ctx job-c\n")
+            self.assertEqual(monitor_lib.pending_changes(state), ["jobs"])
+            self.assertEqual([e["job"] for e in monitor_lib.status(state)["job_events"]], ["job-c"])
+
+    def test_the_times_to_write_on_the_board_come_ready_made(self):
+        with tempfile.TemporaryDirectory() as state:
+            report = monitor_lib.status(state)
+            now = datetime.datetime.fromisoformat(report["now"])
+            next_by = datetime.datetime.fromisoformat(report["next_by"])
+            self.assertIsNotNone(now.utcoffset())
+            self.assertEqual(next_by - now, datetime.timedelta(minutes=25))
+            self.assertEqual(report["checked_at"], now.strftime("%H:%M"))
+            self.assertIsNone(report["cluster_ok_at"])
+
+    def test_times_gives_the_stamp_values_without_marking_anything_seen(self):
+        with tempfile.TemporaryDirectory() as state:
+            self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
+            times = monitor_lib.times()
+            self.assertEqual(sorted(times), ["checked_at", "next_by", "now"])
+            self.assertEqual(monitor_lib.pending_changes(state), ["local_a"])
+
+    def test_cluster_ok_at_is_the_newest_successful_read(self):
+        with tempfile.TemporaryDirectory() as state:
+            listing = json.dumps({"items": []})
+            monitor_lib.record_jobs(state, "one", listing, now="2026-11-10T10:00:00-05:00")
+            monitor_lib.record_jobs(state, "two", listing, now="2026-11-10T10:07:00-05:00")
+            self.assertEqual(monitor_lib.status(state)["cluster_ok_at"], "2026-11-10T10:07:00-05:00")
 
     def test_only_the_named_sessions_are_reported_and_watched(self):
         with tempfile.TemporaryDirectory() as state:
@@ -271,7 +385,7 @@ class PendingChanges(unittest.TestCase):
             monitor_lib.status(state)
             self.assertEqual(monitor_lib.pending_changes(state), [])
             with open(os.path.join(state, "events.log"), "w") as f:
-                f.write("2026-11-10T10:05:00 DONE ctx job-a\n")
+                f.write("2026-11-10T10:05:00-05:00 DONE ctx job-a\n")
             self.assertEqual(monitor_lib.pending_changes(state), ["jobs"])
 
 

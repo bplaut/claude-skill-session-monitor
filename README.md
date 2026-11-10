@@ -36,9 +36,34 @@ The hook and the poller run outside the sandbox, so they run from a copy that
 sandboxed sessions cannot edit. Copy, never symlink:
 
 ```bash
-mkdir -p ~/.claude/skills/monitor && cp SKILL.md board.html hook.py monitor_lib.py poller.sh watch.py ~/.claude/skills/monitor/
+cd ~/review-loop/session-monitor && mkdir -p ~/.claude/skills/monitor && cp SKILL.md board.html hook.py monitor_lib.py poller.sh watch.py ~/.claude/skills/monitor/
 ```
 
-Then add the hook entries in `settings-hooks.json` to `~/.claude/settings.json`
-(back the file up first, append to arrays that already exist, and check it
-still parses).
+Add the hook entries in `settings-hooks.json` to `~/.claude/settings.json`.
+Back the file up first, and append to arrays that already exist; a JSON error
+there stops every hook from loading. Then check it parses and that your
+existing hooks are still listed:
+
+```bash
+python3 -m json.tool ~/.claude/settings.json > /dev/null && echo ok
+```
+
+The state folder in those entries and in `SKILL.md` must be the one the poller
+is given.
+
+## Run
+
+In a terminal tab, with `FLAMINGO_USERNAME` set (the poller refuses to guess
+it):
+
+```bash
+~/.claude/skills/monitor/poller.sh ~/eval-awareness/playground/session-monitor/state
+```
+
+Then type `/monitor` in the monitor session: a pinned session in
+`~/eval-awareness`, in auto mode, that you have not renamed by hand. Open the
+board's link in a browser window; its session links do nothing inside the
+Claude app.
+
+A permission-prompt row can stay up while a command you approved is still
+running: the hook learns a prompt was answered only when its tool finishes.

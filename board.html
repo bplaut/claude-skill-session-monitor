@@ -5,7 +5,7 @@
 /* Layout: one narrow column for a slim browser window beside the app; a status bar, then one row per Active session, the ones waiting on you first. */
 :root {
   --bg: #f3f5f7; --surface: #ffffff; --sunk: #e9edf1; --line: #d3dae1;
-  --ink: #17212b; --muted: #5d6b79; --faint: #8a96a3;
+  --ink: #17212b; --muted: #5d6b79; --faint: #66727f;
   --you: #b3321b; --you-bg: #fbe9e4; --run: #8a5a00; --run-bg: #fbf0d6;
   --link: #1f4f8f;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -92,12 +92,17 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
     $('checked').textContent = meta && meta.checkedAt ? 'checked ' + String(meta.checkedAt) : 'not written yet';
 
     // The page judges staleness by its own clock, so it shows even when the monitor is gone.
+    // A next-check time that is missing or unreadable counts as stale: the page must fail toward red.
     var stopped = meta && meta.stopped;
-    var late = !stopped && meta && meta.nextBy && Date.now() > Date.parse(meta.nextBy) + 120000;
+    var nextMs = meta ? Date.parse(meta.nextBy) : NaN;
+    var unreadable = cards.length > 0 && !(nextMs > 0);
+    var late = !stopped && (unreadable || Date.now() > nextMs + 120000);
     var clusterMs = meta && meta.clusterOkAt ? Date.parse(meta.clusterOkAt) : NaN;
-    var clusterDown = run > 0 && !stopped && !late && (!(clusterMs > 0) || Date.now() - clusterMs > 180000);
+    var clusterOld = !(clusterMs > 0) || Date.now() - clusterMs > 180000;
+    var clusterDown = run > 0 && !stopped && !late && clusterOld;
     var banner = $('banner'), text = '';
     if (stopped) text = 'Stopped at ' + String(meta.stopped) + '. Type /monitor in the monitor session to start it.';
+    else if (unreadable) text = 'Stale: the board has no readable next-check time. Type /monitor in the monitor session.';
     else if (late) text = 'Stale: last checked ' + String(meta.checkedAt) + '. Type /monitor in the monitor session.';
     else if (storeNote) text = storeNote;
     else if (meta && meta.note) text = String(meta.note);
@@ -106,11 +111,14 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
     banner.className = 'banner' + (late ? ' stale' : '');
 
     var rows = $('rows'); rows.className = 'rows' + (late || stopped ? ' dim' : '');
-    if (!cards.length) return;
     rows.textContent = '';
+    if (!cards.length) {
+      rows.appendChild(el('div', 'empty', meta ? 'No sessions in your Active group.' : 'No rows yet. Type /monitor in the monitor session; sessions in your Active group appear here.'));
+      return;
+    }
+    function when(c) { var t = Date.parse(c.since); return t > 0 ? t : 0; }
     cards.slice().sort(function (a, b) {
-      var r = RANK[stateOf(a)] - RANK[stateOf(b)];
-      return r || String(b.since || '').localeCompare(String(a.since || ''));
+      return (RANK[stateOf(a)] - RANK[stateOf(b)]) || (when(b) - when(a));
     }).forEach(function (c) {
       var state = stateOf(c), quiet = state === 'working' || state === 'idle';
       var row = el('div', 'row' + (quiet ? ' quiet' : ''));
@@ -121,7 +129,12 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
         title.href = 'claude://claude.ai/epitaxy/' + id; title.target = '_blank'; title.rel = 'noopener';
       } else { title = el('span', 'title', String(c.title || c.id)); }
       row.appendChild(title);
-      var stamp = state === 'you' ? waited(c.since) : (state === 'run' && c.asOf ? 'as of ' + String(c.asOf) : '');
+      // A run the cluster can show is as fresh as the last cluster read; a card's own
+      // asOf is only for runs the monitor cannot see, and is the session's word.
+      var stamp = '';
+      if (state === 'you') stamp = waited(c.since);
+      else if (state === 'run' && c.asOf) stamp = 'as of ' + String(c.asOf);
+      else if (state === 'run') stamp = clusterOld ? 'cluster unread' : 'as of ' + hhmm(clusterMs);
       row.appendChild(el('span', 'stamp', stamp));
       if (c.what) row.appendChild(el('span', 'what', String(c.what)));
       if (c.then) row.appendChild(el('span', 'then', String(c.then)));
@@ -132,8 +145,9 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
   var db = window.claude && window.claude.use ? await window.claude.use('db') : null;
   if (!db) { storeNote = 'This view cannot reach the board\'s data. Open the page on claude.ai in a browser.'; render(); return; }
   var slow = setTimeout(function () { if (!confirmed) { storeNote = 'No answer from the board\'s data after 10 seconds; this may be out of date.'; render(); } }, 10000);
-  function got(fromCache) { if (!fromCache) { confirmed = true; clearTimeout(slow); storeNote = ''; } }
-  function failed(e) { storeNote = 'Could not read the board\'s data (' + String(e && e.code) + ').'; render(); }
+  var broken = false;
+  function got(fromCache) { if (!fromCache && !broken) { confirmed = true; clearTimeout(slow); storeNote = ''; } }
+  function failed(e) { broken = true; clearTimeout(slow); storeNote = 'Could not read the board\'s data (' + String(e && e.code) + '). Reload the page.'; render(); }
   db.collection('cards').onSnapshot(function (snap) {
     cards = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data() || {}); });
     got(snap.metadata.fromCache); render();

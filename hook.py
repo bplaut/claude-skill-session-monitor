@@ -30,10 +30,10 @@ def main():
 
     directory = os.path.join(sys.argv[1], "hooks")
     path = os.path.join(directory, session + ".jsonl")
-    # Only a tool call needs the file's last record, and it runs after every
-    # tool in every session, so nothing else pays for the read.
-    last_kind = monitor_lib.last_kind(path) if event.get("hook_event_name") == "PostToolUse" else None
-    record = monitor_lib.record_for(event, last_kind)
+    # Only the permission events need the file's last records, so nothing else
+    # pays for the read.
+    reads_recent = event.get("hook_event_name") in ("PostToolUse", "Notification")
+    record = monitor_lib.record_for(event, monitor_lib.recent_records(path) if reads_recent else [])
     if record is None:
         return
 

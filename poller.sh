@@ -46,10 +46,10 @@ while true; do
   line="$(date +%H:%M:%S)"
   for ctx in "${CONTEXTS[@]}"; do
     if out=$(kubectl --kubeconfig "$KDIR/$ctx" -n u-eval-awareness --request-timeout=20s get vcjob -l "username=$FLAMINGO_USERNAME" -o json 2> "$KDIR/err"); then
-      if printf '%s' "$out" | /usr/bin/python3 "$HERE/monitor_lib.py" record-jobs "$STATE" "$ctx"; then
+      if printf '%s' "$out" | /usr/bin/python3 "$HERE/monitor_lib.py" record-jobs "$STATE" "$ctx" 2> "$KDIR/err"; then
         line="$line  $ctx ok"
       else
-        line="$line  $ctx UNREADABLE OUTPUT"
+        line="$line  $ctx RECORD FAILED ($(tail -n 1 "$KDIR/err" | head -c 120))"
       fi
     else
       line="$line  $ctx READ FAILED ($(head -c 120 "$KDIR/err" | tr '\n' ' '))"
