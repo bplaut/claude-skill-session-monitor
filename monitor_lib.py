@@ -165,7 +165,8 @@ def record_for(event, recent):
     if name == "Stop":
         return {"kind": "stop"}
     if name == "UserPromptSubmit":
-        return None if is_automated_prompt(event.get("prompt")) else {"kind": "reply"}
+        # Either kind starts a turn; only a reply is the user answering.
+        return {"kind": "auto"} if is_automated_prompt(event.get("prompt")) else {"kind": "reply"}
     return None
 
 
@@ -220,11 +221,29 @@ def recent_records(path):
     return records
 
 
+def turn_state(records):
+    """Whether a turn is in flight, from the session's own turn markers, or None.
+
+    A prompt (the user's or an automated one) starts a turn and a stop ends
+    it. The hook writes these as they happen, so this is ahead of the app's
+    session list, which can still report a turn as running just after its
+    stop.
+    """
+    for record in reversed(records):
+        kind = record.get("kind")
+        if kind == "stop":
+            return {"state": "ended", "since": record.get("ts")}
+        if kind in ("reply", "auto"):
+            return {"state": "in_flight", "since": record.get("ts")}
+    return None
+
+
 def open_items(records):
     """What a session is waiting on the user for, from its hook records.
 
     The question is the latest box record, while it asks something and no
     reply follows it. The prompt is the latest permission prompt still open.
+    The turn is whether the session is mid-turn.
     """
     question = None
     boxes = [i for i, r in enumerate(records) if r.get("kind") == "box"]
@@ -237,7 +256,18 @@ def open_items(records):
     prompt = open_prompt(records)
     if prompt is not None:
         prompt = {key: prompt.get(key) for key in ("tool_name", "text", "ts")}
-    return {"question": question, "prompt": prompt}
+    return {"question": question, "prompt": prompt, "turn": turn_state(records)}
+
+
+def seconds_since(ts, now):
+    """Whole seconds from an ISO time to `now`, or None if `ts` is not one."""
+    try:
+        then = datetime.datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+    if then.tzinfo is None:
+        then = then.astimezone()
+    return int((now - then).total_seconds())
 
 
 def diff_jobs(before, after):
@@ -383,14 +413,18 @@ def status(state, only=None):
     os.makedirs(state, exist_ok=True)
     if only is not None:
         write_json(os.path.join(state, "watching.json"), sorted(only))
+    now = datetime.datetime.now().astimezone()
     sessions = {}
     for session, path in hook_files(state):
         with open(path, "rb") as f:
             records, end = read_records(f.read())
         if only is None or session in only:
             last = records[-1] if records else {}
+            items = open_items(records)
+            if items["turn"]:
+                items["turn"]["age_seconds"] = seconds_since(items["turn"]["since"], now)
             sessions[session] = dict(
-                open_items(records),
+                items,
                 changed=end > offsets["hooks"].get(session, 0),
                 last_kind=last.get("kind"),
                 last_ts=last.get("ts"),

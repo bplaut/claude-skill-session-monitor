@@ -59,9 +59,9 @@ Otherwise decide by the first line that fits.
 
 | State | When | Row text (`what`, then `then`) |
 |---|---|---|
-| `you`, kind `question` | Its hook status has a `question`, and it is not running | The `ask` in quotation marks, or the first sentence of `recap` if there is no `ask`. `then`: the button labels joined by " · " |
+| `you`, kind `question` | Its hook status has a `question` | The `ask` in quotation marks, or the first sentence of `recap` if there is no `ask`. `then`: the button labels joined by " · " |
 | `you`, kind `prompt` | Its hook status has a `prompt` | `approve <tool_name>: <text>`; for `AskUserQuestion`, the question itself |
-| `working` | `isRunning` is true | `Mid-turn.` |
+| `working` | It is mid-turn (see the rule below) | `Mid-turn.` |
 | `you`, kind `run finished` | It has recorded jobs (see below), and every one has ended or one has failed | `tell it: <job> finished at HH:MM`, or `failed at HH:MM`, or `ended at HH:MM, outcome unknown` for phase `Gone`. `then`: what it said to do next, in its words |
 | `you`, kind `hand-off` | Its closing message hands Ben a command to run, and no evidence shows he ran it | `run: <the command, cut to 80 characters>` |
 | `run` | Its closing message says it is waiting on a job, download or eval | What the run is and where. `then`: `then you: <what Ben does when it ends>` or `then nothing from you` |
@@ -69,6 +69,13 @@ Otherwise decide by the first line that fits.
 
 More rules:
 
+- **Mid-turn comes from the hook, not from `isRunning`.** The session list
+  lags the hook by a moment, so at the end of a turn it still says running
+  when the hook has already recorded the stop. Use the hook status's `turn`:
+  - `turn.state` is `ended`: not mid-turn, whatever `isRunning` says.
+  - `turn.state` is `in_flight`: mid-turn, unless `isRunning` is false and
+    `turn.age_seconds` is over 120 (an interrupted turn leaves no end marker).
+  - No `turn`: mid-turn exactly when `isRunning` is true.
 - A question or prompt comes only from the hook status, never from your reading
   of a transcript. A session with no entry in the hook status has not been seen
   by the hook yet: decide it from its transcript, and if that leaves it `idle`,
@@ -121,16 +128,16 @@ More rules:
    ```
 
    It prints `checked_at`, `next_by` and `cluster_ok_at` (copy these to the
-   board exactly as printed); per session its open `question` and `prompt` and
-   whether its hook file `changed`; the new `job_events`; and `clusters`, each
+   board exactly as printed); per session its open `question` and `prompt`,
+   its `turn`, and whether its hook file `changed`; the new `job_events`; and `clusters`, each
    with its jobs and `okAt`, the time it was last read.
 5. A session needs re-deciding if any of these holds: `changed` is true; its
    `isRunning` or `lastActivityAt` differs from its stored row; one of its
-   recorded jobs is in `job_events`; its stored state is `run`; it is new to
-   Active. Re-decide every Active session if Ben typed a command, or more than
+   recorded jobs is in `job_events`; its stored state is `run` or `working`;
+   it is new to Active. Re-decide every Active session if Ben typed a command, or more than
    45 minutes have passed since `lastWake`.
 6. Work out each such session's state. Read its transcript tail (`list_events`,
-   `limit` 8) only when it has no open question or prompt and is not running;
+   `limit` 8) only when it has no open question or prompt and is not mid-turn;
    otherwise the hook status is enough.
 7. If any row's state, kind, `what`, `then` or `asOf` changed, or a stored
    row's session is no longer Active:

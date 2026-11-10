@@ -129,7 +129,7 @@ class RecordFor(unittest.TestCase):
         reply = {"hook_event_name": "UserPromptSubmit", "prompt": "yes, go ahead"}
         self.assertEqual(monitor_lib.record_for(reply, [])["kind"], "reply")
 
-    def test_an_automated_or_empty_prompt_is_not_a_reply(self):
+    def test_an_automated_or_empty_prompt_starts_a_turn_but_is_not_a_reply(self):
         for prompt in (
             "<task-notification>\n<task-id>b0</task-id>",
             "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated",
@@ -138,7 +138,7 @@ class RecordFor(unittest.TestCase):
             None,
         ):
             event = {"hook_event_name": "UserPromptSubmit", "prompt": prompt}
-            self.assertIsNone(monitor_lib.record_for(event, []), prompt)
+            self.assertEqual(monitor_lib.record_for(event, []), {"kind": "auto"}, prompt)
 
     def test_a_subagent_writes_only_prompt_records(self):
         self.assertIsNone(monitor_lib.record_for(dict(box("Q?"), agent_id="a1"), []))
@@ -198,8 +198,23 @@ class OpenItems(unittest.TestCase):
     def test_a_request_alone_is_not_a_prompt(self):
         self.assertIsNone(self.items(request())["prompt"])
 
+    def test_an_automated_turn_leaves_the_question_open(self):
+        asked = {"kind": "box", "ask": "Go?", "actions": [], "recap": "r", "blocked": False}
+        items = self.items({"kind": "reply"}, asked, {"kind": "stop"}, {"kind": "auto"}, {"kind": "stop"})
+        self.assertEqual(items["question"]["ask"], "Go?")
+
+    def test_the_turn_is_in_flight_from_a_prompt_until_the_stop(self):
+        asked = {"kind": "box", "ask": "Go?", "actions": [], "recap": "r", "blocked": False}
+        self.assertEqual(self.items({"kind": "reply"})["turn"], {"state": "in_flight", "since": "t0"})
+        self.assertEqual(self.items({"kind": "reply"}, request(), waiting())["turn"], {"state": "in_flight", "since": "t0"})
+        self.assertEqual(self.items({"kind": "reply"}, asked, {"kind": "stop"})["turn"], {"state": "ended", "since": "t2"})
+        self.assertEqual(self.items({"kind": "reply"}, asked, {"kind": "stop"}, {"kind": "auto"})["turn"], {"state": "in_flight", "since": "t3"})
+
+    def test_the_turn_is_unknown_without_a_prompt_or_stop(self):
+        self.assertIsNone(self.items(request())["turn"])
+
     def test_no_records(self):
-        self.assertEqual(monitor_lib.open_items([]), {"question": None, "prompt": None})
+        self.assertEqual(monitor_lib.open_items([]), {"question": None, "prompt": None, "turn": None})
 
 
 class DiffJobs(unittest.TestCase):
@@ -304,6 +319,16 @@ class Status(unittest.TestCase):
             third = monitor_lib.status(state)
             self.assertTrue(third["sessions"]["local_a"]["changed"])
             self.assertIsNone(third["sessions"]["local_a"]["question"])
+
+    def test_each_session_reports_how_long_ago_its_turn_started_or_ended(self):
+        with tempfile.TemporaryDirectory() as state:
+            ended = (datetime.datetime.now().astimezone() - datetime.timedelta(seconds=90)).isoformat(timespec="seconds")
+            self.write(state, "local_a", {"ts": ended, "kind": "stop"})
+            self.write(state, "local_b", {"ts": "not a time", "kind": "reply"})
+            sessions = monitor_lib.status(state)["sessions"]
+            self.assertEqual(sessions["local_a"]["turn"]["state"], "ended")
+            self.assertTrue(85 <= sessions["local_a"]["turn"]["age_seconds"] <= 100, sessions["local_a"]["turn"])
+            self.assertEqual(sessions["local_b"]["turn"], {"state": "in_flight", "since": "not a time", "age_seconds": None})
 
     def test_job_events_are_reported_once(self):
         with tempfile.TemporaryDirectory() as state:
