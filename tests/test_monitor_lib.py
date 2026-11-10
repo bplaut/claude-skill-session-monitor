@@ -127,7 +127,12 @@ class RecordFor(unittest.TestCase):
     def test_stop_and_reply(self):
         self.assertEqual(monitor_lib.record_for({"hook_event_name": "Stop"}, [])["kind"], "stop")
         reply = {"hook_event_name": "UserPromptSubmit", "prompt": "yes, go ahead"}
-        self.assertEqual(monitor_lib.record_for(reply, [])["kind"], "reply")
+        self.assertEqual(monitor_lib.record_for(reply, []), {"kind": "reply", "head": "yes, go ahead"})
+
+    def test_a_reply_keeps_only_the_start_of_its_prompt_on_one_line(self):
+        reply = {"hook_event_name": "UserPromptSubmit", "prompt": "first line\nsecond line " + "x" * 100}
+        head = monitor_lib.record_for(reply, [])["head"]
+        self.assertEqual(head, "first line second line " + "x" * 17)
 
     def test_an_automated_or_empty_prompt_starts_a_turn_but_is_not_a_reply(self):
         for prompt in (

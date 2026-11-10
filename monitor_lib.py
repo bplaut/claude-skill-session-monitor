@@ -165,8 +165,13 @@ def record_for(event, recent):
     if name == "Stop":
         return {"kind": "stop"}
     if name == "UserPromptSubmit":
-        # Either kind starts a turn; only a reply is the user answering.
-        return {"kind": "auto"} if is_automated_prompt(event.get("prompt")) else {"kind": "reply"}
+        # Either kind starts a turn; only a reply is the user answering. A reply
+        # keeps the start of its text, so an automated prompt mistaken for one
+        # can be recognized in the file and its opening added to the list above.
+        prompt = event.get("prompt")
+        if is_automated_prompt(prompt):
+            return {"kind": "auto"}
+        return {"kind": "reply", "head": " ".join(str(prompt).split())[:40]}
     return None
 
 
