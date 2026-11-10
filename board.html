@@ -46,7 +46,10 @@ h1 .n { color: var(--you); }
 span.title { color: var(--ink); }
 .what, .then { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .then { color: var(--muted); }
-a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.tools { display: inline-flex; align-items: baseline; gap: 10px; }
+#refresh { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid var(--line); background: var(--surface); color: var(--link); cursor: pointer; }
+#refresh:disabled { color: var(--faint); cursor: default; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .empty { padding: 18px 12px; color: var(--muted); }
 .foot { font-size: 12px; color: var(--faint); }
 </style>
@@ -54,8 +57,9 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 <div class="board">
   <div class="bar">
     <h1 id="count">Session board</h1>
-    <span class="stamp" id="checked">not written yet</span>
+    <span class="tools"><span class="stamp" id="checked">not written yet</span><button type="button" id="refresh" hidden>Refresh</button></span>
   </div>
+  <div class="foot" id="refresh-note" hidden></div>
   <div class="banner" id="banner" hidden></div>
   <div class="rows" id="rows"><div class="empty">No rows yet. Type /monitor in the monitor session; sessions in your Active group appear here.</div></div>
   <div class="foot" id="foot">Open this page in a browser window. Session links do nothing inside the Claude app.</div>
@@ -141,6 +145,45 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
       rows.appendChild(row);
     });
   }
+
+  // The Refresh button asks the monitor to check now. A page cannot start a session's
+  // turn directly; what it can do is send a comment to Claude, which wakes a session
+  // that is watching this page. One thread is reused so the requests do not pile up.
+  (async function () {
+    var comments = window.claude && window.claude.use ? await window.claude.use('comments') : null;
+    if (!comments) return;
+    var button = $('refresh'), note = $('refresh-note'), anchor = null;
+    function say(text) { note.textContent = text; note.hidden = !text; }
+    async function check() {
+      var can;
+      try { can = await comments.canSendToClaude(); } catch (e) { can = 'off'; }
+      button.hidden = can !== 'available' && can !== 'no_session';
+      button.disabled = can !== 'available';
+      if (can === 'no_session') say('Refresh needs the monitor to be watching this page: type /monitor followed by this page\'s link in the monitor session.');
+      else if (note.textContent.indexOf('Refresh needs') === 0) say('');
+    }
+    try { anchor = await comments.anchorFor($('count')); } catch (e) {}
+    await check();
+    setInterval(check, 30000);
+    button.addEventListener('click', function () {
+      // Nothing is awaited before the send: it must come straight from the click.
+      var thread = null;
+      try { thread = localStorage.getItem('refreshThread'); } catch (e) {}
+      if (!thread && !anchor) { say('Refresh is not available in this view. Type /monitor in the monitor session.'); return; }
+      button.disabled = true;
+      say('Asking the monitor to check now…');
+      comments.sendToClaude(thread ? { threadId: thread, text: 'refresh' } : { anchor: anchor, text: 'refresh' }).then(function (sent) {
+        try { localStorage.setItem('refreshThread', sent.threadId); } catch (e) {}
+        say('Asked at ' + hhmm(Date.now()) + '. The checked time moves when the monitor has looked.');
+      }, function (e) {
+        var code = String(e && e.code);
+        // A stored thread that no longer takes replies is forgotten, so the next press starts a new one.
+        if (thread) { try { localStorage.removeItem('refreshThread'); } catch (x) {} }
+        say(code === 'consent_required' ? 'Not sent: allow this page to comment as you, then press Refresh again.'
+          : 'Not sent (' + code + '). Press Refresh again, or type /monitor in the monitor session.');
+      }).then(function () { button.disabled = false; });
+    });
+  })();
 
   var db = window.claude && window.claude.use ? await window.claude.use('db') : null;
   if (!db) { storeNote = 'This view cannot reach the board\'s data. Open the page on claude.ai in a browser.'; render(); return; }
