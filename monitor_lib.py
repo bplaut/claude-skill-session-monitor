@@ -32,6 +32,10 @@ ENDED = (FINISHED, "Gone") + FAILED
 # that appends from several processes cannot interleave.
 RECORD_LIMIT = 4096
 
+# How many characters of the user's message a reply record keeps: enough to
+# show what was asked, and far under the record limit.
+REPLY_HEAD = 200
+
 # How long a job stays in the stored listing after the cluster drops it, so a
 # session waiting on it can still be told how it ended.
 KEEP_ENDED = datetime.timedelta(hours=24)
@@ -166,12 +170,13 @@ def record_for(event, recent):
         return {"kind": "stop"}
     if name == "UserPromptSubmit":
         # Either kind starts a turn; only a reply is the user answering. A reply
-        # keeps the start of its text, so an automated prompt mistaken for one
-        # can be recognized in the file and its opening added to the list above.
+        # keeps the start of its text: the board shows it as what the session
+        # was last asked, and an automated prompt mistaken for a reply can be
+        # recognized in the file and its opening added to the list above.
         prompt = event.get("prompt")
         if is_automated_prompt(prompt):
             return {"kind": "auto"}
-        return {"kind": "reply", "head": " ".join(str(prompt).split())[:40]}
+        return {"kind": "reply", "head": " ".join(str(prompt).split())[:REPLY_HEAD]}
     return None
 
 
@@ -249,11 +254,19 @@ def open_items(records):
     The question is the latest box record, while it asks something and no
     reply follows it. The prompt is the latest permission prompt still open.
     The turn is whether the session is mid-turn.
+
+    The recap and asked say where the session stands, whether or not it is
+    waiting: the session's latest summary of its own work, and the start of
+    the user's latest message to it, each with its time so the reader can
+    tell which came last.
     """
     question = None
+    recap = None
     boxes = [i for i, r in enumerate(records) if r.get("kind") == "box"]
     if boxes:
         box = records[boxes[-1]]
+        if box.get("recap"):
+            recap = {"text": box["recap"], "ts": box.get("ts")}
         replied = any(r.get("kind") == "reply" for r in records[boxes[-1] + 1 :])
         if (box.get("ask") or box.get("blocked")) and not replied:
             question = {key: box.get(key) for key in ("ask", "actions", "recap", "blocked", "ts")}
@@ -261,7 +274,11 @@ def open_items(records):
     prompt = open_prompt(records)
     if prompt is not None:
         prompt = {key: prompt.get(key) for key in ("tool_name", "text", "ts")}
-    return {"question": question, "prompt": prompt, "turn": turn_state(records)}
+    asked = None
+    replies = [r for r in records if r.get("kind") == "reply"]
+    if replies and replies[-1].get("head"):
+        asked = {"text": replies[-1]["head"], "ts": replies[-1].get("ts")}
+    return {"question": question, "prompt": prompt, "turn": turn_state(records), "recap": recap, "asked": asked}
 
 
 def seconds_since(ts, now):

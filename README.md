@@ -133,9 +133,11 @@ prints the table again each time a row changes.
 
 ### 8. Open the board
 
-Open the board's link in a browser window and leave it beside the app. Its
-session titles are links that jump to the session. They work from a browser,
-and do nothing in the app's own page viewer.
+Open the board's link in a browser window and leave it beside the app. Each
+row says what the session needs and, to the right in a wide window or
+underneath in a slim one, where it stands. Its session titles are links that
+jump to the session. They work from a browser, and do nothing in the app's own
+page viewer.
 
 ### Check that it works
 

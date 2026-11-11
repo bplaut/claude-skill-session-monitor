@@ -103,6 +103,16 @@ More rules:
 - If you are unsure between `you` and anything else, choose `you` and say why
   in `what`.
 - Keep `what` and `then` under 25 words each.
+- **Every row also has a `detail`:** where the session stands, for a user who
+  has forgotten what it was doing. Up to 60 words, never repeating `what`.
+  Build it from the hook status:
+  - Start with the session's `recap`, its own summary from its last turn end,
+    in its words; shorten it if it is long.
+  - If `asked` has a later `ts` than the recap, or there is no recap, add
+    `You then said: "<the asked text, cut to 25 words>"`.
+  - If you read the transcript tail this wake and its closing message is later
+    than the recap, summarize the closing message instead of the recap.
+  - With none of these, leave `detail` out.
 
 ## A wake
 
@@ -130,8 +140,9 @@ More rules:
 
    It prints `checked_at`, `next_by` and `cluster_ok_at` (copy these to the
    board exactly as printed); per session its open `question` and `prompt`,
-   its `turn`, and whether its hook file `changed`; the new `job_events`; and `clusters`, each
-   with its jobs and `okAt`, the time it was last read.
+   its `turn`, its latest `recap` and what the user last `asked` it (each with
+   a `ts`), and whether its hook file `changed`; the new `job_events`; and
+   `clusters`, each with its jobs and `okAt`, the time it was last read.
 5. A session needs re-deciding if any of these holds: `changed` is true; its
    `isRunning` or `lastActivityAt` differs from its stored row; one of its
    recorded jobs is in `job_events`; its stored state is `run` or `working`;
@@ -140,7 +151,7 @@ More rules:
 6. Work out each such session's state. Read its transcript tail (`list_events`,
    `limit` 8) only when it has no open question or prompt and is not mid-turn;
    otherwise the hook status is enough.
-7. If any row's state, kind, `what`, `then` or `asOf` changed, or a stored
+7. If any row's state, kind, `what`, `then`, `detail` or `asOf` changed, or a stored
    row's session is no longer Active:
    - `ArtifactData` `list` on `cards` and on `meta`, for their versions.
    - One `ArtifactData` `batch`: `set` each changed card, `delete` each
@@ -168,6 +179,7 @@ More rules:
 | `kind` | For `you` rows: `question`, `prompt`, `run finished` or `hand-off` |
 | `sessionId`, `title` | From `list_sessions` |
 | `what`, `then` | The row text; leave `then` out when there is none |
+| `detail` | Where the session stands; leave it out when there is none |
 | `since` | When the session entered this state, as a time with offset copied from the data: a question's or prompt's `ts`; a finished job's `endedAt`; otherwise the session's `lastActivityAt` |
 | `asOf` | Only for a `run` row that says `(unchecked)`: `HH:MM` of the session's last message. Leave it out otherwise; the page shows the cluster's read time itself |
 
@@ -186,7 +198,7 @@ More rules:
   "watcherTaskId": "<the Monitor task id>",
   "watcherArmedAt": "<time with offset>",
   "lastWake": "<time with offset>",
-  "rows": {"<session id>": {"state": "", "kind": "", "what": "", "then": "", "since": "", "asOf": "", "isRunning": false, "lastActivityAt": "", "jobs": []}},
+  "rows": {"<session id>": {"state": "", "kind": "", "what": "", "then": "", "detail": "", "since": "", "asOf": "", "isRunning": false, "lastActivityAt": "", "jobs": []}},
   "setAside": {"<session id>": {"at": "<time with offset>", "lastActivityAt": ""}}
 }
 ```
@@ -218,12 +230,12 @@ own window as a clickable board.
 First one line, `**<N> on you** · <M> on a run · checked <HH:MM>` (no bold when
 N is 0: `Nothing on you · ...`), then:
 
-| | Session | What it needs |
-|---|---|---|
-| 🔴 **on you** | `**[<title>](#<session id>)**` | `what` · `then` · how long it has waited |
-| 🟡 on a run | `[<title>](#<session id>)` | `what` · `then` |
-| working | `[<title>](#<session id>)` | `what` |
-| idle | `[<title>](#<session id>)` | `what` |
+| | Session | What it needs | Where it stands |
+|---|---|---|---|
+| 🔴 **on you** | `**[<title>](#<session id>)**` | `what` · `then` · how long it has waited | `detail` |
+| 🟡 on a run | `[<title>](#<session id>)` | `what` · `then` | `detail` |
+| working | `[<title>](#<session id>)` | `what` | `detail` |
+| idle | `[<title>](#<session id>)` | `what` | `detail` |
 
 One row per Active session, in that order of states, the newest first within
 a state. Only "on you" rows are bold, and only "on you" and "on a run" rows

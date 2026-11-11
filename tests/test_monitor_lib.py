@@ -130,9 +130,9 @@ class RecordFor(unittest.TestCase):
         self.assertEqual(monitor_lib.record_for(reply, []), {"kind": "reply", "head": "yes, go ahead"})
 
     def test_a_reply_keeps_only_the_start_of_its_prompt_on_one_line(self):
-        reply = {"hook_event_name": "UserPromptSubmit", "prompt": "first line\nsecond line " + "x" * 100}
+        reply = {"hook_event_name": "UserPromptSubmit", "prompt": "first line\nsecond line " + "x" * 300}
         head = monitor_lib.record_for(reply, [])["head"]
-        self.assertEqual(head, "first line second line " + "x" * 17)
+        self.assertEqual(head, "first line second line " + "x" * 177)
 
     def test_an_automated_or_empty_prompt_starts_a_turn_but_is_not_a_reply(self):
         for prompt in (
@@ -218,8 +218,23 @@ class OpenItems(unittest.TestCase):
     def test_the_turn_is_unknown_without_a_prompt_or_stop(self):
         self.assertIsNone(self.items(request())["turn"])
 
+    def test_the_latest_recap_and_reply_are_kept_for_the_row_detail(self):
+        quiet = {"kind": "box", "ask": None, "actions": [], "recap": "Tests pass; nothing pushed.", "blocked": False}
+        items = self.items({"kind": "reply", "head": "fix the bug"}, quiet, {"kind": "stop"}, {"kind": "reply", "head": "now push it"})
+        self.assertIsNone(items["question"])
+        self.assertEqual(items["recap"], {"text": "Tests pass; nothing pushed.", "ts": "t1"})
+        self.assertEqual(items["asked"], {"text": "now push it", "ts": "t3"})
+
+    def test_a_reply_recorded_without_its_text_is_not_reported_as_asked(self):
+        items = self.items({"kind": "reply", "head": "first"}, {"kind": "stop"}, {"kind": "reply"})
+        self.assertIsNone(items["asked"])
+        self.assertIsNone(items["recap"])
+
     def test_no_records(self):
-        self.assertEqual(monitor_lib.open_items([]), {"question": None, "prompt": None, "turn": None})
+        self.assertEqual(
+            monitor_lib.open_items([]),
+            {"question": None, "prompt": None, "turn": None, "recap": None, "asked": None},
+        )
 
 
 class DiffJobs(unittest.TestCase):

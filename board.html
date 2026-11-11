@@ -2,7 +2,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one narrow column for a slim browser window beside the app; a status bar, then one row per Active session, the ones waiting on you first. */
+/* Layout: a status bar, then one row per Active session, the ones waiting on you first. In a wide window each row has what the session needs on the left and where it stands on the right; in a slim window beside the app the two stack. */
 :root {
   --bg: #f3f5f7; --surface: #ffffff; --sunk: #e9edf1; --line: #d3dae1;
   --ink: #17212b; --muted: #5d6b79; --faint: #66727f;
@@ -23,7 +23,7 @@
   --link: #8ab8f0; color-scheme: dark }
 body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45;
   padding-block: 16px 32px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-.board { max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.board { max-width: 940px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
 .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 h1 { font-size: 16px; font-weight: 600; margin: 0; }
 h1 .n { color: var(--you); }
@@ -32,9 +32,15 @@ h1 .n { color: var(--you); }
 .banner.stale { border-color: var(--you); background: var(--you-bg); color: var(--you); }
 .rows { background: var(--surface); border: 1px solid var(--line); }
 .rows.dim { opacity: .5; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 10px 12px; border-top: 1px solid var(--line); align-items: baseline; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px 16px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .row:first-child { border-top: 0; }
-.row > * { min-width: 0; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: baseline; align-content: start; }
+.row > *, .main > * { min-width: 0; }
+.detail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+@media (min-width: 700px) {
+  .row { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); }
+  .detail { border-left: 1px solid var(--line); padding-left: 16px; }
+}
 .row.quiet { padding-block: 7px; background: var(--sunk); }
 .row.quiet .title { font-weight: 500; }
 .row.quiet .what { color: var(--muted); }
@@ -122,22 +128,25 @@ a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
     }).forEach(function (c) {
       var state = stateOf(c), quiet = state === 'working' || state === 'idle';
       var row = el('div', 'row' + (quiet ? ' quiet' : ''));
-      row.appendChild(el('span', 'chip ' + state, LABEL[state]));
+      var main = el('div', 'main');
+      main.appendChild(el('span', 'chip ' + state, LABEL[state]));
       var id = String(c.sessionId || ''), title;
       if (SESSION.test(id)) {
         title = el('a', 'title', String(c.title || id));
         title.href = 'claude://claude.ai/epitaxy/' + id; title.target = '_blank'; title.rel = 'noopener';
       } else { title = el('span', 'title', String(c.title || c.id)); }
-      row.appendChild(title);
+      main.appendChild(title);
       // A run the cluster can show is as fresh as the last cluster read; a card's own
       // asOf is only for runs the monitor cannot see, and is the session's word.
       var stamp = '';
       if (state === 'you') stamp = waited(c.since);
       else if (state === 'run' && c.asOf) stamp = 'as of ' + String(c.asOf);
       else if (state === 'run') stamp = clusterOld ? 'cluster unread' : 'as of ' + hhmm(clusterMs);
-      row.appendChild(el('span', 'stamp', stamp));
-      if (c.what) row.appendChild(el('span', 'what', String(c.what)));
-      if (c.then) row.appendChild(el('span', 'then', String(c.then)));
+      main.appendChild(el('span', 'stamp', stamp));
+      if (c.what) main.appendChild(el('span', 'what', String(c.what)));
+      if (c.then) main.appendChild(el('span', 'then', String(c.then)));
+      row.appendChild(main);
+      if (c.detail) row.appendChild(el('div', 'detail', String(c.detail)));
       rows.appendChild(row);
     });
   }
