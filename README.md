@@ -183,8 +183,9 @@ poller.
 
 - A permission-prompt row can stay up while a command you approved is still
   running: the hook learns a prompt was answered only when its tool finishes.
-- A session added to `Active` appears at the monitor's next wake, which can be
-  up to 20 minutes away. `/monitor` shows it at once.
+- A session added to `Active` appears, and one archived or moved out of it
+  leaves, at the monitor's next wake: the next time any watched session
+  changes, or up to 20 minutes away. `/monitor` does it at once.
 - A session's own scheduled loop tick is recorded as a reply from you, so it
   can clear that session's open question from the board until it asks again.
 - The app shows its usual "task finished" banner when the monitor ends a turn

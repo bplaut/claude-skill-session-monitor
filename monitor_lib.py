@@ -415,7 +415,7 @@ def times():
     }
 
 
-def status(state, only=None):
+def status(state, active=None):
     """Everything the monitor needs from the state directory, as one dict.
 
     Marks what it read as seen: `changed` is true for a session whose file
@@ -423,7 +423,7 @@ def status(state, only=None):
     reported once. The offsets stored are the ends of what was actually read,
     so a record that lands during the call is reported by the next one.
 
-    `only` is the list of session ids the monitor is showing. Given, it limits
+    `active` is the list of session ids the monitor is showing. Given, it limits
     the report to them and is stored as the watch list, so the watcher stops
     waking the monitor for other sessions, the monitor's own among them: its
     turn ends would otherwise wake it again without end.
@@ -433,14 +433,14 @@ def status(state, only=None):
     """
     offsets = read_offsets(state)
     os.makedirs(state, exist_ok=True)
-    if only is not None:
-        write_json(os.path.join(state, "watching.json"), sorted(only))
+    if active is not None:
+        write_json(os.path.join(state, "watching.json"), sorted(active))
     now = datetime.datetime.now().astimezone()
     sessions = {}
     for session, path in hook_files(state):
         with open(path, "rb") as f:
             records, end = read_records(f.read())
-        if only is None or session in only:
+        if active is None or session in active:
             last = records[-1] if records else {}
             items = open_items(records)
             if items["turn"]:
@@ -507,8 +507,9 @@ def pending_changes(state):
 
 
 USAGE = """usage:
-  monitor_lib.py status <state-dir> [--only id ...]  print the state as JSON and mark it seen;
-                                                     --only limits it to, and watches, those sessions
+  monitor_lib.py status <state-dir> [--active id ...]  print the state as JSON and mark it seen;
+                                                       --active takes every session the monitor shows:
+                                                       the report covers them and the watcher watches them
   monitor_lib.py times                               print the board's stamp values for now, touching nothing
   monitor_lib.py pending <state-dir>                 print what changed since the last status
   monitor_lib.py record-jobs <state-dir> <context>   store a `kubectl get vcjob -o json` listing from stdin
@@ -516,9 +517,9 @@ USAGE = """usage:
 
 
 def main(argv):
-    if len(argv) >= 3 and argv[1] == "status":
-        only = argv[4:] if len(argv) >= 4 and argv[3] == "--only" else None
-        json.dump(status(argv[2], only), sys.stdout, separators=(",", ":"))
+    if len(argv) >= 3 and argv[1] == "status" and (len(argv) == 3 or argv[3] == "--active"):
+        active = argv[4:] if len(argv) > 3 else None
+        json.dump(status(argv[2], active), sys.stdout, separators=(",", ":"))
         print()
     elif len(argv) >= 2 and argv[1] == "times":
         json.dump(times(), sys.stdout, separators=(",", ":"))

@@ -4,7 +4,9 @@ Run with the same interpreter the hook uses:
     /usr/bin/python3 -m unittest discover -s tests
 """
 
+import contextlib
 import datetime
+import io
 import json
 import os
 import sys
@@ -397,7 +399,7 @@ class Status(unittest.TestCase):
         with tempfile.TemporaryDirectory() as state:
             self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
             self.write(state, "local_b", {"ts": "t1", "kind": "stop"})
-            report = monitor_lib.status(state, only=["local_a"])
+            report = monitor_lib.status(state, active=["local_a"])
             self.assertEqual(list(report["sessions"]), ["local_a"])
             # A session outside the list still has its records marked seen, and
             # its later turns no longer count as something to wake up for.
@@ -406,10 +408,23 @@ class Status(unittest.TestCase):
             self.write(state, "local_a", {"ts": "t2", "kind": "stop"})
             self.assertEqual(monitor_lib.pending_changes(state), ["local_a"])
 
+    def test_the_command_line_takes_the_active_sessions_and_refuses_any_other_flag(self):
+        with tempfile.TemporaryDirectory() as state:
+            self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
+            self.write(state, "local_b", {"ts": "t1", "kind": "stop"})
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(monitor_lib.main(["monitor_lib.py", "status", state, "--only", "local_a"]), 2)
+            self.assertEqual(out.getvalue(), "")
+            self.assertFalse(os.path.exists(os.path.join(state, "watching.json")))
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(monitor_lib.main(["monitor_lib.py", "status", state, "--active", "local_a"]), 0)
+            self.assertEqual(list(json.loads(out.getvalue())["sessions"]), ["local_a"])
+
     def test_an_empty_list_watches_no_session(self):
         with tempfile.TemporaryDirectory() as state:
             self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
-            self.assertEqual(monitor_lib.status(state, only=[])["sessions"], {})
+            self.assertEqual(monitor_lib.status(state, active=[])["sessions"], {})
             self.write(state, "local_a", {"ts": "t2", "kind": "stop"})
             self.assertEqual(monitor_lib.pending_changes(state), [])
 

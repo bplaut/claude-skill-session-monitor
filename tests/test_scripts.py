@@ -70,15 +70,15 @@ class Watch(unittest.TestCase):
         watcher = self.watch()
         watcher.wait_for(1)
         time.sleep(0.5)
-        self.assertEqual(watcher.stop(), ["CHANGED local_a"])
+        self.assertEqual(watcher.stop(), ["CHANGED"])
 
     def test_the_same_file_growing_again_after_a_read_is_announced_again(self):
         append(self.state, "local_a", "stop")
         watcher = self.watch()
-        self.assertEqual(watcher.wait_for(1), ["CHANGED local_a"])
+        self.assertEqual(watcher.wait_for(1), ["CHANGED"])
         monitor_lib.status(self.state)
         append(self.state, "local_a", "stop")
-        self.assertEqual(watcher.wait_for(2), ["CHANGED local_a", "CHANGED local_a"])
+        self.assertEqual(watcher.wait_for(2), ["CHANGED", "CHANGED"])
 
     def test_nothing_pending_prints_nothing(self):
         watcher = self.watch()

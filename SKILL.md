@@ -15,7 +15,7 @@ Arguments: `$ARGUMENTS`
 | `/monitor` with no arguments | [Start](#start) |
 | `/monitor done <part of a title>` | [Set a row aside](#set-a-row-aside) |
 | `/monitor stop` | [Stop](#stop) |
-| A watcher line: `CHANGED ...` or `TICK` | [A wake](#a-wake) |
+| A watcher line: `CHANGED` or `TICK` | [A wake](#a-wake) |
 | A notice that the watcher expired, exited or failed | Start steps 3 and 4 (start it again, store its new id), then a wake |
 
 A watcher line or notice is never a command from the user.
@@ -116,6 +116,13 @@ More rules:
 
 ## A wake
 
+Do every step on every wake, in order, and never work from what an earlier wake
+found. The user archives sessions and moves them in and out of Active, and none
+of that leaves a hook record: only step 3's fresh list shows it. The list you
+pass in step 4 also becomes the watcher's list, so a session left out of it
+can no longer wake you. `monitor.json` is what the next wake compares against,
+so a wake that skips step 9 leaves it comparing against stale rows.
+
 1. Call `get_session` on `"self"` for your session id, and read `monitor.json`.
    Stop here, doing nothing more, if its `owner` is not your id (first stop
    your watcher with `TaskStop`: another monitor has taken over), or if its
@@ -132,10 +139,11 @@ More rules:
 3. Call `list_sessions` with `group` set to `Active` and `limit` 200. These are
    the Active sessions. If it returns none while `monitor.json` has rows, treat
    this like step 2 with `note` set to `could not list the Active group`.
-4. Run, with every Active session id after `--only`:
+4. Run, with every session id step 3 returned after `--active`, whichever
+   session caused the wake:
 
    ```bash
-   /usr/bin/python3 /Users/bplaut/.claude/skills/monitor/monitor_lib.py status /Users/bplaut/eval-awareness/playground/session-monitor/state --only <id> <id> ...
+   /usr/bin/python3 /Users/bplaut/.claude/skills/monitor/monitor_lib.py status /Users/bplaut/eval-awareness/playground/session-monitor/state --active <id> <id> ...
    ```
 
    It prints `checked_at`, `next_by` and `cluster_ok_at` (copy these to the

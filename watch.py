@@ -3,9 +3,11 @@
 
 The monitor session runs this in the background. Each line printed wakes it:
 
-  CHANGED <names>   hook files (by session id) or the job events ("jobs") have
-                    grown past what the monitor last read
-  TICK              the heartbeat, so the monitor checks in even when nothing changes
+  CHANGED   hook files or the job events have grown past what the monitor last read
+  TICK      the heartbeat, so the monitor checks in even when nothing changes
+
+A line never names what changed: the monitor's status command reports that,
+and a named session invites the monitor to check that session alone.
 
 It only reads inside the state directory and uses no network.
 
@@ -42,7 +44,7 @@ def main(argv):
         # mid-turn it cannot read them, and repeating the line would only queue
         # more wakes; once it has read, the same file growing again is news.
         if pending and (pending, read_at) != announced:
-            print("CHANGED " + " ".join(pending), flush=True)
+            print("CHANGED", flush=True)
         announced = (pending, read_at)
         if time.monotonic() >= next_tick:
             print("TICK", flush=True)
