@@ -423,10 +423,13 @@ def status(state, active=None):
     reported once. The offsets stored are the ends of what was actually read,
     so a record that lands during the call is reported by the next one.
 
-    `active` is the list of session ids the monitor is showing. Given, it limits
-    the report to them and is stored as the watch list, so the watcher stops
-    waking the monitor for other sessions, the monitor's own among them: its
-    turn ends would otherwise wake it again without end.
+    `active` maps each session the monitor is showing to its `lastActivityAt`,
+    both as the app's session list gave them. Given, it limits the report to
+    those sessions and is stored as the watch list, so the watcher stops waking
+    the monitor for other sessions, the monitor's own among them: its turn ends
+    would otherwise wake it again without end. The report then also says which
+    stored rows have `departed`, which sessions are `new` and which have
+    `moved` (see `compare_with_rows`).
 
     `checked_at`, `next_by` and `cluster_ok_at` are the values to write on the
     board as they stand, so the monitor never has to compute a time.
@@ -476,13 +479,49 @@ def status(state, active=None):
     for context, cluster in stored.items():
         jobs = {name: {k: v for k, v in job.items() if k != "created"} for name, job in cluster["jobs"].items()}
         clusters[context] = {"okAt": cluster["okAt"], "jobs": jobs}
-    return dict(
+    report = dict(
         times(),
         cluster_ok_at=max((c["okAt"] for c in clusters.values()), default=None),
         sessions=sessions,
         job_events=job_events,
         clusters=clusters,
     )
+    if active is not None:
+        rows = read_json(os.path.join(state, "monitor.json"), {}).get("rows", {})
+        report.update(compare_with_rows(active, rows))
+    return report
+
+
+def compare_with_rows(active, rows):
+    """How the sessions listed now differ from the rows the monitor stored at its last wake.
+
+    `departed` are stored rows whose session is no longer listed (archived, or
+    moved out of the group), `new` are listed sessions with no row, and `moved`
+    are sessions whose `lastActivityAt` differs from their row's. The monitor
+    works from these: a session missing from a list is easy to overlook when
+    comparing by eye.
+    """
+    return {
+        "departed": sorted(s for s in rows if s not in active),
+        "new": sorted(s for s in active if s not in rows),
+        "moved": sorted(s for s in active if s in rows and rows[s].get("lastActivityAt") != active[s]),
+    }
+
+
+def parse_active(arguments):
+    """The `--active` arguments, each `<session id>=<lastActivityAt>`, as a dict.
+
+    A bare id is refused: the time changes from wake to wake, so the monitor
+    has to write the arguments from a fresh session list and cannot repeat an
+    earlier command, which would keep a session that has since left.
+    """
+    active = {}
+    for argument in arguments:
+        session, separator, activity = argument.partition("=")
+        if not (separator and activity and SESSION_ID.match(session)):
+            raise ValueError("%r is not <session id>=<lastActivityAt>" % argument)
+        active[session] = activity
+    return active
 
 
 def pending_changes(state):
@@ -507,9 +546,10 @@ def pending_changes(state):
 
 
 USAGE = """usage:
-  monitor_lib.py status <state-dir> [--active id ...]  print the state as JSON and mark it seen;
-                                                       --active takes every session the monitor shows:
-                                                       the report covers them and the watcher watches them
+  monitor_lib.py status <state-dir> [--active id=lastActivityAt ...]
+        print the state as JSON and mark it seen; --active takes every session the monitor shows,
+        each with its lastActivityAt from the session list: the report covers them, says which
+        have departed, are new or have moved, and the watcher watches them
   monitor_lib.py times                               print the board's stamp values for now, touching nothing
   monitor_lib.py pending <state-dir>                 print what changed since the last status
   monitor_lib.py record-jobs <state-dir> <context>   store a `kubectl get vcjob -o json` listing from stdin
@@ -518,7 +558,11 @@ USAGE = """usage:
 
 def main(argv):
     if len(argv) >= 3 and argv[1] == "status" and (len(argv) == 3 or argv[3] == "--active"):
-        active = argv[4:] if len(argv) > 3 else None
+        try:
+            active = parse_active(argv[4:]) if len(argv) > 3 else None
+        except ValueError as error:
+            sys.stderr.write("status: %s\n%s" % (error, USAGE))
+            return 2
         json.dump(status(argv[2], active), sys.stdout, separators=(",", ":"))
         print()
     elif len(argv) >= 2 and argv[1] == "times":

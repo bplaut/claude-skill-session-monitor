@@ -399,7 +399,7 @@ class Status(unittest.TestCase):
         with tempfile.TemporaryDirectory() as state:
             self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
             self.write(state, "local_b", {"ts": "t1", "kind": "stop"})
-            report = monitor_lib.status(state, active=["local_a"])
+            report = monitor_lib.status(state, active={"local_a": "t1"})
             self.assertEqual(list(report["sessions"]), ["local_a"])
             # A session outside the list still has its records marked seen, and
             # its later turns no longer count as something to wake up for.
@@ -408,23 +408,53 @@ class Status(unittest.TestCase):
             self.write(state, "local_a", {"ts": "t2", "kind": "stop"})
             self.assertEqual(monitor_lib.pending_changes(state), ["local_a"])
 
-    def test_the_command_line_takes_the_active_sessions_and_refuses_any_other_flag(self):
+    def test_sessions_that_left_arrived_or_moved_are_worked_out_from_the_stored_rows(self):
+        with tempfile.TemporaryDirectory() as state:
+            rows = {
+                "local_same": {"lastActivityAt": "t1"},
+                "local_moved": {"lastActivityAt": "t1"},
+                "local_gone": {"lastActivityAt": "t1"},
+            }
+            with open(os.path.join(state, "monitor.json"), "w") as f:
+                json.dump({"owner": "local_m", "rows": rows}, f)
+            report = monitor_lib.status(state, active={"local_same": "t1", "local_moved": "t2", "local_fresh": "t3"})
+            self.assertEqual(report["departed"], ["local_gone"])
+            self.assertEqual(report["new"], ["local_fresh"])
+            self.assertEqual(report["moved"], ["local_moved"])
+
+    def test_before_any_row_is_stored_every_listed_session_is_new(self):
+        with tempfile.TemporaryDirectory() as state:
+            report = monitor_lib.status(state, active={"local_a": "t1"})
+            self.assertEqual((report["departed"], report["new"], report["moved"]), ([], ["local_a"], []))
+
+    def test_the_command_line_takes_each_session_with_its_activity_time_and_refuses_anything_else(self):
         with tempfile.TemporaryDirectory() as state:
             self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
             self.write(state, "local_b", {"ts": "t1", "kind": "stop"})
-            out, err = io.StringIO(), io.StringIO()
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                self.assertEqual(monitor_lib.main(["monitor_lib.py", "status", state, "--only", "local_a"]), 2)
-            self.assertEqual(out.getvalue(), "")
-            self.assertFalse(os.path.exists(os.path.join(state, "watching.json")))
+            refused = (
+                ["--only", "local_a=2026-11-11T19:04:24.136Z"],  # a flag it does not know
+                ["--active", "local_a"],  # an id without its time, as an earlier command had it
+                ["--active", "local_a="],
+                ["--active", "not-a-session=2026-11-11T19:04:24.136Z"],
+            )
+            for arguments in refused:
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    self.assertEqual(monitor_lib.main(["monitor_lib.py", "status", state] + arguments), 2, arguments)
+                self.assertEqual(out.getvalue(), "", arguments)
+                self.assertFalse(os.path.exists(os.path.join(state, "watching.json")), arguments)
+            out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                self.assertEqual(monitor_lib.main(["monitor_lib.py", "status", state, "--active", "local_a"]), 0)
-            self.assertEqual(list(json.loads(out.getvalue())["sessions"]), ["local_a"])
+                code = monitor_lib.main(["monitor_lib.py", "status", state, "--active", "local_a=2026-11-11T19:04:24.136Z"])
+            self.assertEqual(code, 0)
+            report = json.loads(out.getvalue())
+            self.assertEqual(list(report["sessions"]), ["local_a"])
+            self.assertEqual(report["new"], ["local_a"])
 
     def test_an_empty_list_watches_no_session(self):
         with tempfile.TemporaryDirectory() as state:
             self.write(state, "local_a", {"ts": "t1", "kind": "stop"})
-            self.assertEqual(monitor_lib.status(state, active=[])["sessions"], {})
+            self.assertEqual(monitor_lib.status(state, active={})["sessions"], {})
             self.write(state, "local_a", {"ts": "t2", "kind": "stop"})
             self.assertEqual(monitor_lib.pending_changes(state), [])
 

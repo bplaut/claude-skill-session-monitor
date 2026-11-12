@@ -118,10 +118,12 @@ More rules:
 
 Do every step on every wake, in order, and never work from what an earlier wake
 found. The user archives sessions and moves them in and out of Active, and none
-of that leaves a hook record: only step 3's fresh list shows it. The list you
-pass in step 4 also becomes the watcher's list, so a session left out of it
-can no longer wake you. `monitor.json` is what the next wake compares against,
-so a wake that skips step 9 leaves it comparing against stale rows.
+of that leaves a hook record: only step 3's fresh list shows it. Write step 4's
+command from that list each time, never from a command you ran before: an
+earlier command still names sessions that have since left. The sessions you
+pass in step 4 also become the watcher's list, so a session left out can no
+longer wake you. `monitor.json` is what the next wake compares against, so a
+wake that skips step 9 leaves it comparing against stale rows.
 
 1. Call `get_session` on `"self"` for your session id, and read `monitor.json`.
    Stop here, doing nothing more, if its `owner` is not your id (first stop
@@ -139,38 +141,43 @@ so a wake that skips step 9 leaves it comparing against stale rows.
 3. Call `list_sessions` with `group` set to `Active` and `limit` 200. These are
    the Active sessions. If it returns none while `monitor.json` has rows, treat
    this like step 2 with `note` set to `could not list the Active group`.
-4. Run, with every session id step 3 returned after `--active`, whichever
-   session caused the wake:
+4. Go down step 3's list and write one `<sessionId>=<lastActivityAt>` for each
+   session in it, whichever session caused the wake. Run, with those after
+   `--active`:
 
    ```bash
-   /usr/bin/python3 /Users/bplaut/.claude/skills/monitor/monitor_lib.py status /Users/bplaut/eval-awareness/playground/session-monitor/state --active <id> <id> ...
+   /usr/bin/python3 /Users/bplaut/.claude/skills/monitor/monitor_lib.py status /Users/bplaut/eval-awareness/playground/session-monitor/state --active <id>=<lastActivityAt> <id>=<lastActivityAt> ...
    ```
 
    It prints `checked_at`, `next_by` and `cluster_ok_at` (copy these to the
    board exactly as printed); per session its open `question` and `prompt`,
    its `turn`, its latest `recap` and what the user last `asked` it (each with
    a `ts`), and whether its hook file `changed`; the new `job_events`; and
-   `clusters`, each with its jobs and `okAt`, the time it was last read.
-5. A session needs re-deciding if any of these holds: `changed` is true; its
-   `isRunning` or `lastActivityAt` differs from its stored row; one of its
-   recorded jobs is in `job_events`; its stored state is `run` or `working`;
-   it is new to Active. Re-decide every Active session if the user typed a command, or more than
-   45 minutes have passed since `lastWake`.
+   `clusters`, each with its jobs and `okAt`, the time it was last read. It
+   also compares what you passed with the rows in `monitor.json` and prints
+   `departed` (stored rows whose session you did not pass), `new` (sessions
+   with no stored row) and `moved` (sessions whose `lastActivityAt` differs
+   from their row's). Work from these three; do not compare the lists yourself.
+5. A session needs re-deciding if any of these holds: `changed` is true; it is
+   in `moved` or `new`; one of its recorded jobs is in `job_events`; its stored
+   state is `run` or `working`. Re-decide every Active session if the user
+   typed a command, or more than 45 minutes have passed since `lastWake`.
 6. Work out each such session's state. Read its transcript tail (`list_events`,
    `limit` 8) only when it has no open question or prompt and is not mid-turn;
    otherwise the hook status is enough.
-7. If any row's state, kind, `what`, `then`, `detail` or `asOf` changed, or a stored
-   row's session is no longer Active:
+7. If any row's state, kind, `what`, `then`, `detail` or `asOf` changed, or
+   `departed` is not empty:
    - `ArtifactData` `list` on `cards` and on `meta`, for their versions.
-   - One `ArtifactData` `batch`: `set` each changed card, `delete` each
-     departed one, `set` `meta/board`. Pin every entry whose document already
+   - One `ArtifactData` `batch`: `set` each changed card, `delete` the card
+     of each session in `departed`, `set` `meta/board`. Pin every entry whose document already
      exists with its version; leave the pin off a new one. On a version
      conflict, list and write once more.
 
    If nothing changed, write only `meta/board`: `get` it for its version, then
    `set` it pinned (or unpinned if it does not exist yet).
 8. Set your title to `<N> on you · <HH:MM of next_by> · Monitor`.
-9. Write `monitor.json`.
+9. Write `monitor.json`, with no row for a session in `departed` and each
+   remaining row's `lastActivityAt` as step 3 gave it.
 10. End the turn:
     - If the user typed a command, reply as that command says.
     - Otherwise, if step 7 wrote a changed or departed row, print
@@ -206,7 +213,7 @@ so a wake that skips step 9 leaves it comparing against stale rows.
   "watcherTaskId": "<the Monitor task id>",
   "watcherArmedAt": "<time with offset>",
   "lastWake": "<time with offset>",
-  "rows": {"<session id>": {"state": "", "kind": "", "what": "", "then": "", "detail": "", "since": "", "asOf": "", "isRunning": false, "lastActivityAt": "", "jobs": []}},
+  "rows": {"<session id>": {"state": "", "kind": "", "what": "", "then": "", "detail": "", "since": "", "asOf": "", "lastActivityAt": "", "jobs": []}},
   "setAside": {"<session id>": {"at": "<time with offset>", "lastActivityAt": ""}}
 }
 ```
