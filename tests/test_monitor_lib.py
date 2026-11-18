@@ -377,7 +377,7 @@ class Status(unittest.TestCase):
             now = datetime.datetime.fromisoformat(report["now"])
             next_by = datetime.datetime.fromisoformat(report["next_by"])
             self.assertIsNotNone(now.utcoffset())
-            self.assertEqual(next_by - now, datetime.timedelta(minutes=25))
+            self.assertEqual(next_by - now, datetime.timedelta(minutes=80))
             self.assertEqual(report["checked_at"], now.strftime("%H:%M"))
             self.assertIsNone(report["cluster_ok_at"])
 

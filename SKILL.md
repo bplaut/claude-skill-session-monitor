@@ -16,7 +16,7 @@ Arguments: `$ARGUMENTS`
 | `/monitor done <part of a title>` | [Set a row aside](#set-a-row-aside) |
 | `/monitor stop` | [Stop](#stop) |
 | A watcher line: `CHANGED` or `TICK` | [A wake](#a-wake) |
-| A notice that the watcher expired, exited or failed | Start steps 3 and 4 (start it again, store its new id), then a wake |
+| A notice that the watcher expired, exited or failed | Start steps 3 and 4 (start it again, store its new id), then a wake only if more than 45 minutes have passed since `lastWake`. If starting it is denied, don't retry: set your title to `monitor DOWN: type /monitor` and `meta/board` `note` to `monitor down since HH:MM: type /monitor` |
 
 A watcher line or notice is never a command from the user.
 

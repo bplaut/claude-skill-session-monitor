@@ -4,7 +4,8 @@
 The monitor session runs this in the background. Each line printed wakes it:
 
   CHANGED   hook files or the job events have grown past what the monitor last read
-  TICK      the heartbeat, so the monitor checks in even when nothing changes
+  TICK      a heartbeat; its default period outlasts the Monitor tool's
+            30-minute cap, so in use the watcher's expiry notice is the heartbeat
 
 A line never names what changed: the monitor's status command reports that,
 and a named session invites the monitor to check that session alone.
@@ -29,7 +30,9 @@ def main(argv):
         return 2
     state = argv[1]
     poll = float(argv[2]) if len(argv) > 2 else 15.0
-    tick = float(argv[3]) if len(argv) > 3 else 1200.0
+    # Longer than the Monitor tool's 30-minute cap, so the watcher never ticks:
+    # the periodic wake comes from its expiry notice, gated on 45 minutes in SKILL.md.
+    tick = float(argv[3]) if len(argv) > 3 else 2700.0
 
     offsets_path = os.path.join(state, "offsets.json")
     announced = None

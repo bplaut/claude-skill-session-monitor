@@ -15,7 +15,8 @@ are working or idle.
    `<state>/events.log`.
 3. **`watch.py`** runs in the background of the monitor session. It prints a
    line, which wakes the monitor, when a watched hook file or the events log
-   grows, and every 20 minutes.
+   grows. The Monitor tool stops it every 30 minutes; the monitor restarts it,
+   and also runs a wake if its last one was over 45 minutes ago.
 4. **`SKILL.md`** is the `/monitor` procedure the monitor session follows on
    each wake: read the state with `monitor_lib.py status`, decide each
    session's row, write changed rows to the board, and print the board in
@@ -185,7 +186,7 @@ poller.
   running: the hook learns a prompt was answered only when its tool finishes.
 - A session added to `Active` appears, and one archived or moved out of it
   leaves, at the monitor's next wake: the next time any watched session
-  changes, or up to 20 minutes away. `/monitor` does it at once.
+  changes, or up to about 75 minutes away. `/monitor` does it at once.
 - A session's own scheduled loop tick is recorded as a reply from you, so it
   can clear that session's open question from the board until it asks again.
 - The app shows its usual "task finished" banner when the monitor ends a turn

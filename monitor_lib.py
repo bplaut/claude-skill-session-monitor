@@ -41,7 +41,9 @@ REPLY_HEAD = 200
 KEEP_ENDED = datetime.timedelta(hours=24)
 
 # The board treats a check as overdue once this long has passed without one.
-NEXT_CHECK = datetime.timedelta(minutes=25)
+# An idle monitor wakes on the first watcher expiry more than 45 minutes after
+# its last wake, and the watcher expires every 30 minutes, so up to 75 minutes.
+NEXT_CHECK = datetime.timedelta(minutes=80)
 
 ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
