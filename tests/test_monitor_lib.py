@@ -147,6 +147,22 @@ class RecordFor(unittest.TestCase):
             event = {"hook_event_name": "UserPromptSubmit", "prompt": prompt}
             self.assertEqual(monitor_lib.record_for(event, []), {"kind": "auto"}, prompt)
 
+    def test_a_stop_keeps_the_closing_message_on_one_line(self):
+        event = {"hook_event_name": "Stop", "last_assistant_message": "Done.\n\nRun   this:\n`make`"}
+        self.assertEqual(monitor_lib.record_for(event, []), {"kind": "stop", "text": "Done. Run this: `make`"})
+
+    def test_a_long_closing_message_keeps_its_start_and_its_end(self):
+        message = "a" * 500 + "b" * 2000 + "c" * 1000
+        text = monitor_lib.record_for({"hook_event_name": "Stop", "last_assistant_message": message}, [])["text"]
+        self.assertEqual(text, "a" * 500 + " … " + "c" * 1000)
+        exact = "x" * monitor_lib.CLOSING_LIMIT
+        self.assertEqual(monitor_lib.record_for({"hook_event_name": "Stop", "last_assistant_message": exact}, [])["text"], exact)
+
+    def test_a_stop_with_no_closing_message_has_no_text(self):
+        for message in (None, "", "  \n ", 42):
+            event = {"hook_event_name": "Stop", "last_assistant_message": message}
+            self.assertEqual(monitor_lib.record_for(event, []), {"kind": "stop"}, message)
+
     def test_a_subagent_writes_only_prompt_records(self):
         self.assertIsNone(monitor_lib.record_for(dict(box("Q?"), agent_id="a1"), []))
         self.assertIsNone(monitor_lib.record_for({"hook_event_name": "Stop", "agent_id": "a1"}, []))
@@ -170,6 +186,13 @@ class EncodeRecord(unittest.TestCase):
         line = monitor_lib.encode_record(record)
         self.assertLessEqual(len(line), monitor_lib.RECORD_LIMIT)
         self.assertEqual(json.loads(line)["kind"], "box")
+
+
+    def test_a_long_closing_text_is_cut_from_its_start(self):
+        text = "\U0001f600" * 1000 + "the end"
+        line = monitor_lib.encode_record({"kind": "stop", "text": text})
+        self.assertLessEqual(len(line), monitor_lib.RECORD_LIMIT)
+        self.assertTrue(json.loads(line)["text"].endswith("the end"))
 
 
 class OpenItems(unittest.TestCase):
@@ -232,10 +255,16 @@ class OpenItems(unittest.TestCase):
         self.assertIsNone(items["asked"])
         self.assertIsNone(items["recap"])
 
+    def test_the_closing_message_is_the_latest_stops(self):
+        items = self.items({"kind": "stop", "text": "first"}, {"kind": "reply"}, {"kind": "stop", "text": "second"})
+        self.assertEqual(items["closing"], {"text": "second", "ts": "t2"})
+        # A later turn that ended with no text leaves no closing message: the earlier one is stale.
+        self.assertIsNone(self.items({"kind": "stop", "text": "first"}, {"kind": "reply"}, {"kind": "stop"})["closing"])
+
     def test_no_records(self):
         self.assertEqual(
             monitor_lib.open_items([]),
-            {"question": None, "prompt": None, "turn": None, "recap": None, "asked": None},
+            {"question": None, "prompt": None, "turn": None, "recap": None, "asked": None, "closing": None},
         )
 
 
@@ -316,6 +345,56 @@ class RecordJobs(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     monitor_lib.record_jobs(state, "ctx", bad, now="2026-11-10T10:05:00-05:00")
             self.assertEqual(self.jobs(state)["okAt"], "2026-11-10T10:00:00-05:00")
+
+
+class RowState(unittest.TestCase):
+    """Each rule of the row's state, in the order they are tried."""
+
+    QUESTION = {"ask": "Go?", "ts": "2026-11-10T10:00:00-05:00"}
+    PROMPT = {"tool_name": "Bash", "text": "ls", "ts": "2026-11-10T10:00:00-05:00"}
+
+    def state(self, running=False, row=None, set_aside=None, activity="t1", clusters=None, **items):
+        base = {"question": None, "prompt": None, "turn": {"state": "ended", "since": "t0", "age_seconds": 30},
+                "recap": None, "asked": None, "closing": {"text": "Done.", "ts": "t0"}}
+        base.update(items)
+        return monitor_lib.row_state(base, running, row or {}, set_aside, activity, clusters or {})
+
+    def test_a_set_aside_holds_until_the_session_moves_or_asks_again(self):
+        aside = {"at": "2026-11-10T09:00:00-05:00", "lastActivityAt": "t1"}
+        self.assertEqual(self.state(set_aside=aside, question=dict(self.QUESTION, ts="2026-11-10T08:00:00-05:00")),
+                         {"state": "idle", "kind": None, "why": "set aside"})
+        self.assertEqual(self.state(set_aside=aside, activity="t2")["state"], "read")
+        self.assertEqual(self.state(set_aside=aside, question=self.QUESTION)["kind"], "question")
+        self.assertEqual(self.state(set_aside=aside, prompt=self.PROMPT)["kind"], "prompt")
+
+    def test_an_open_question_then_an_open_prompt_put_it_on_the_user(self):
+        self.assertEqual(self.state(question=self.QUESTION, prompt=self.PROMPT), {"state": "you", "kind": "question", "why": None})
+        self.assertEqual(self.state(prompt=self.PROMPT), {"state": "you", "kind": "prompt", "why": None})
+
+    def test_mid_turn_comes_from_the_turn_markers_then_is_running(self):
+        recent = {"state": "in_flight", "since": "t0", "age_seconds": 30}
+        stale = {"state": "in_flight", "since": "t0", "age_seconds": 300}
+        self.assertEqual(self.state(turn=recent)["state"], "working")
+        self.assertEqual(self.state(turn=stale, running=True)["state"], "working")
+        self.assertEqual(self.state(turn=stale)["state"], "read")  # interrupted: no end marker
+        self.assertEqual(self.state(running=True)["state"], "read")  # ended, the list lags
+        self.assertEqual(self.state(turn=None, running=True)["state"], "working")
+        self.assertEqual(self.state(turn=None)["state"], "read")
+
+    def test_recorded_jobs_that_all_ended_or_one_that_failed_put_it_on_the_user(self):
+        clusters = {"ctx": {"okAt": "t", "jobs": {"a": {"phase": "Completed"}, "b": {"phase": "Running"},
+                                                   "c": {"phase": "Failed"}, "d": {"phase": "Gone"}}}}
+        finished = {"state": "you", "kind": "run finished", "why": None}
+        self.assertEqual(self.state(row={"jobs": ["a", "d"]}, clusters=clusters), finished)
+        self.assertEqual(self.state(row={"jobs": ["b", "c"]}, clusters=clusters), finished)
+        self.assertEqual(self.state(row={"jobs": ["a", "b"]}, clusters=clusters)["state"], "read")
+        # A job the poller has not listed yet may just have been launched.
+        self.assertEqual(self.state(row={"jobs": ["a", "new"]}, clusters=clusters)["state"], "read")
+
+    def test_with_nothing_to_read_it_is_idle_otherwise_the_monitor_reads_it(self):
+        self.assertEqual(self.state(closing=None), {"state": "idle", "kind": None, "why": "no closing message"})
+        self.assertEqual(self.state(closing=None, recap={"text": "Tests pass.", "ts": "t0"})["state"], "read")
+        self.assertEqual(self.state(), {"state": "read", "kind": None, "why": None})
 
 
 class Status(unittest.TestCase):
@@ -435,7 +514,9 @@ class Status(unittest.TestCase):
                 ["--only", "local_a=2026-11-11T19:04:24.136Z"],  # a flag it does not know
                 ["--active", "local_a"],  # an id without its time, as an earlier command had it
                 ["--active", "local_a="],
-                ["--active", "not-a-session=2026-11-11T19:04:24.136Z"],
+                ["--active", "local_a=2026-11-11T19:04:24.136Z"],  # no running flag
+                ["--active", "local_a=2026-11-11T19:04:24.136Z=yes"],
+                ["--active", "not-a-session=2026-11-11T19:04:24.136Z=0"],
             )
             for arguments in refused:
                 out, err = io.StringIO(), io.StringIO()
@@ -445,11 +526,13 @@ class Status(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(state, "watching.json")), arguments)
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                code = monitor_lib.main(["monitor_lib.py", "status", state, "--active", "local_a=2026-11-11T19:04:24.136Z"])
+                code = monitor_lib.main(["monitor_lib.py", "status", state, "--active", "local_a=2026-11-11T19:04:24.136Z=1"])
             self.assertEqual(code, 0)
             report = json.loads(out.getvalue())
             self.assertEqual(list(report["sessions"]), ["local_a"])
             self.assertEqual(report["new"], ["local_a"])
+            # The flag reaches the state: a stop, then isRunning, is a turn that ended.
+            self.assertEqual(report["sessions"]["local_a"]["state"], "idle")
 
     def test_an_empty_list_watches_no_session(self):
         with tempfile.TemporaryDirectory() as state:
@@ -457,6 +540,33 @@ class Status(unittest.TestCase):
             self.assertEqual(monitor_lib.status(state, active={})["sessions"], {})
             self.write(state, "local_a", {"ts": "t2", "kind": "stop"})
             self.assertEqual(monitor_lib.pending_changes(state), [])
+
+    def test_each_listed_session_gets_a_state_even_without_a_hook_file(self):
+        with tempfile.TemporaryDirectory() as state:
+            self.write(state, "local_a", {"ts": "t1", "kind": "reply"}, {"ts": "t2", "kind": "stop", "text": "Run make check."})
+            report = monitor_lib.status(state, active={"local_a": "t2", "local_b": "t1", "local_c": "t1"}, running={"local_b"})
+            sessions = report["sessions"]
+            self.assertEqual(sorted(sessions), ["local_a", "local_b", "local_c"])
+            self.assertEqual((sessions["local_a"]["state"], sessions["local_a"]["closing"]["text"]), ("read", "Run make check."))
+            self.assertEqual(sessions["local_b"]["state"], "working")
+            self.assertEqual((sessions["local_c"]["state"], sessions["local_c"]["why"]), ("idle", "no closing message"))
+            self.assertFalse(sessions["local_c"]["changed"])
+
+    def test_the_state_uses_the_stored_jobs_and_set_asides(self):
+        with tempfile.TemporaryDirectory() as state:
+            listing = {"items": [{"metadata": {"name": "job-a"}, "status": {"state": {"phase": "Completed"}}}]}
+            monitor_lib.record_jobs(state, "ctx", json.dumps(listing), now="2026-11-10T10:00:00-05:00")
+            stored = {
+                "rows": {"local_a": {"lastActivityAt": "t1", "jobs": ["job-a"]}},
+                "setAside": {"local_b": {"at": "2026-11-10T09:00:00-05:00", "lastActivityAt": "t1"}},
+            }
+            with open(os.path.join(state, "monitor.json"), "w") as f:
+                json.dump(stored, f)
+            for session in ("local_a", "local_b"):
+                self.write(state, session, {"ts": "2026-11-10T08:00:00-05:00", "kind": "stop", "text": "Waiting."})
+            sessions = monitor_lib.status(state, active={"local_a": "t1", "local_b": "t1"})["sessions"]
+            self.assertEqual((sessions["local_a"]["state"], sessions["local_a"]["kind"]), ("you", "run finished"))
+            self.assertEqual((sessions["local_b"]["state"], sessions["local_b"]["why"]), ("idle", "set aside"))
 
     def test_files_with_bad_names_are_ignored(self):
         with tempfile.TemporaryDirectory() as state:

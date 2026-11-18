@@ -8,8 +8,9 @@ are working or idle.
 ## The flow
 
 1. **`hook.py`** runs in every session at six hook events. It appends what the
-   session is waiting on (its next-step-box question, a permission prompt) and
-   when its turns start and end to `<state>/hooks/<session id>.jsonl`.
+   session is waiting on (its next-step-box question, a permission prompt),
+   when its turns start and end, and what each turn's closing message said, to
+   `<state>/hooks/<session id>.jsonl`.
 2. **`poller.sh`** runs in a terminal tab. Every minute it lists your cluster
    jobs into `<state>/jobs.json` and appends job transitions to
    `<state>/events.log`.
@@ -18,8 +19,9 @@ are working or idle.
    grows. The Monitor tool stops it every 30 minutes; the monitor restarts it,
    and also runs a wake if its last one was over 45 minutes ago.
 4. **`SKILL.md`** is the `/monitor` procedure the monitor session follows on
-   each wake: read the state with `monitor_lib.py status`, decide each
-   session's row, write changed rows to the board, and print the board in
+   each wake: read the state with `monitor_lib.py status`, which decides each
+   session's state wherever a rule can, decide the rest from each session's
+   closing message, write changed rows to the board, and print the board in
    chat when a row changed.
 5. **`board.html`** is the board page. The monitor writes rows into its
    database and the open page redraws itself.

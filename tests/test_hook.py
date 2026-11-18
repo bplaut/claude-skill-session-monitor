@@ -103,6 +103,11 @@ class Hook(unittest.TestCase):
         result = subprocess.run([sys.executable, HOOK], input=json.dumps(BOX), env=env, capture_output=True, text=True, timeout=10)
         self.assert_silent_success(result)
 
+    def test_a_stop_records_the_closing_message(self):
+        event = {"hook_event_name": "Stop", "last_assistant_message": "All done.\n\nRun `make`."}
+        self.assert_silent_success(run_hook(self.state, event))
+        self.assertEqual(records(self.state)[-1]["text"], "All done. Run `make`.")
+
     def test_a_long_recap_is_cut_so_the_record_stays_small(self):
         event = json.loads(json.dumps(BOX))
         event["tool_input"]["recap"] = "x" * 20000

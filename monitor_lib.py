@@ -36,6 +36,12 @@ RECORD_LIMIT = 4096
 # show what was asked, and far under the record limit.
 REPLY_HEAD = 200
 
+# How much of a session's closing message a stop record keeps. Closing messages
+# end with the commands and decisions left to the user, so a longer one keeps
+# its first CLOSING_HEAD characters and its last CLOSING_LIMIT - CLOSING_HEAD.
+CLOSING_LIMIT = 1500
+CLOSING_HEAD = 500
+
 # How long a job stays in the stored listing after the cluster drops it, so a
 # session waiting on it can still be told how it ended.
 KEEP_ENDED = datetime.timedelta(hours=24)
@@ -169,7 +175,8 @@ def record_for(event, recent):
             "recap": str(tool_input.get("recap") or ""),
         }
     if name == "Stop":
-        return {"kind": "stop"}
+        text = closing_text(event.get("last_assistant_message"))
+        return {"kind": "stop", "text": text} if text else {"kind": "stop"}
     if name == "UserPromptSubmit":
         # Either kind starts a turn; only a reply is the user answering. A reply
         # keeps the start of its text: the board shows it as what the session
@@ -182,12 +189,26 @@ def record_for(event, recent):
     return None
 
 
+def closing_text(message):
+    """A closing message on one line, cut to its start and end if long; None if it has no text."""
+    if not isinstance(message, str):
+        return None
+    text = " ".join(message.split())
+    if not text:
+        return None
+    if len(text) <= CLOSING_LIMIT:
+        return text
+    return text[:CLOSING_HEAD] + " … " + text[-(CLOSING_LIMIT - CLOSING_HEAD) :]
+
+
 def encode_record(record):
     """One JSON line of at most RECORD_LIMIT bytes.
 
     Text is cut to fit, least important first: the recap, then the button
-    labels, then the question. JSON escapes some characters to many bytes, so
-    each cut is checked against the encoded length rather than computed.
+    labels, then the question. A closing message loses its start, since its
+    end says what is left to the user. JSON escapes some characters to many
+    bytes, so each cut is checked against the encoded length rather than
+    computed.
     """
     record = dict(record)
 
@@ -203,6 +224,9 @@ def encode_record(record):
         line = encoded()
     while len(line) > RECORD_LIMIT and record.get("ask"):
         record["ask"] = record["ask"][: len(record["ask"]) // 2]
+        line = encoded()
+    while len(line) > RECORD_LIMIT and record.get("text"):
+        record["text"] = record["text"][len(record["text"]) // 2 :]
         line = encoded()
     return line
 
@@ -260,7 +284,9 @@ def open_items(records):
     The recap and asked say where the session stands, whether or not it is
     waiting: the session's latest summary of its own work, and the start of
     the user's latest message to it, each with its time so the reader can
-    tell which came last.
+    tell which came last. The closing is what the session said as its latest
+    turn ended; a turn that ended with no text leaves none, since an earlier
+    one would be stale.
     """
     question = None
     recap = None
@@ -280,7 +306,91 @@ def open_items(records):
     replies = [r for r in records if r.get("kind") == "reply"]
     if replies and replies[-1].get("head"):
         asked = {"text": replies[-1]["head"], "ts": replies[-1].get("ts")}
-    return {"question": question, "prompt": prompt, "turn": turn_state(records), "recap": recap, "asked": asked}
+    closing = None
+    stops = [r for r in records if r.get("kind") == "stop"]
+    if stops and stops[-1].get("text"):
+        closing = {"text": stops[-1]["text"], "ts": stops[-1].get("ts")}
+    return {
+        "question": question,
+        "prompt": prompt,
+        "turn": turn_state(records),
+        "recap": recap,
+        "asked": asked,
+        "closing": closing,
+    }
+
+
+# How long a turn can stay open with the session list saying it is not
+# running before it counts as interrupted: an interrupt leaves no end marker.
+INTERRUPTED_AFTER = 120
+
+
+def is_mid_turn(turn, running):
+    """Whether a session is mid-turn: its own turn markers first, `isRunning` only without them.
+
+    The session list lags a turn's end, so an ended turn is ended whatever it
+    says; a turn still open is mid-turn unless the list says not running and
+    the turn has been open past INTERRUPTED_AFTER.
+    """
+    if turn is None:
+        return running
+    if turn["state"] == "ended":
+        return False
+    age = turn.get("age_seconds")
+    return running or age is None or age <= INTERRUPTED_AFTER
+
+
+def is_later(ts, than):
+    """Whether ISO time `ts` is after `than`; an unreadable time counts as later."""
+    try:
+        return datetime.datetime.fromisoformat(ts) > datetime.datetime.fromisoformat(than)
+    except (TypeError, ValueError):
+        return True
+
+
+def set_aside_holds(set_aside, activity, items):
+    """Whether the user's set-aside still holds: the session has not moved or asked anything since."""
+    if set_aside.get("lastActivityAt") != activity:
+        return False
+    opened = [items[key] for key in ("question", "prompt") if items[key]]
+    return not any(is_later(item.get("ts"), set_aside.get("at")) for item in opened)
+
+
+def job_phase(name, clusters):
+    """A recorded job's phase in the stored listings, or None if no cluster lists it."""
+    for cluster in clusters.values():
+        if name in cluster["jobs"]:
+            return cluster["jobs"][name]["phase"]
+    return None
+
+
+def row_state(items, running, row, set_aside, activity, clusters):
+    """A session's board state by the rules code can apply, tried in order.
+
+    `items` is the session's open_items (with the turn's age), `running` its
+    `isRunning`, `row` its stored row, `set_aside` its set-aside or None, and
+    `activity` its `lastActivityAt` now. The result's `state` is `read` when
+    only the session's own words can decide it (a hand-off, a run, or idle);
+    `why` says which rule made an `idle`.
+    """
+
+    def state(name, kind=None, why=None):
+        return {"state": name, "kind": kind, "why": why}
+
+    if set_aside and set_aside_holds(set_aside, activity, items):
+        return state("idle", why="set aside")
+    if items["question"]:
+        return state("you", "question")
+    if items["prompt"]:
+        return state("you", "prompt")
+    if is_mid_turn(items["turn"], running):
+        return state("working")
+    phases = [job_phase(name, clusters) for name in row.get("jobs") or []]
+    if phases and (any(p in FAILED for p in phases) or all(p in ENDED for p in phases)):
+        return state("you", "run finished")
+    if not items["closing"] and not items["recap"]:
+        return state("idle", why="no closing message")
+    return state("read")
 
 
 def seconds_since(ts, now):
@@ -417,7 +527,7 @@ def times():
     }
 
 
-def status(state, active=None):
+def status(state, active=None, running=()):
     """Everything the monitor needs from the state directory, as one dict.
 
     Marks what it read as seen: `changed` is true for a session whose file
@@ -431,7 +541,9 @@ def status(state, active=None):
     the monitor for other sessions, the monitor's own among them: its turn ends
     would otherwise wake it again without end. The report then also says which
     stored rows have `departed`, which sessions are `new` and which have
-    `moved` (see `compare_with_rows`).
+    `moved` (see `compare_with_rows`), and gives every listed session, with or
+    without a hook file, its `state`, `kind` and `why` (see `row_state`);
+    `running` holds the listed sessions whose `isRunning` is true.
 
     `checked_at`, `next_by` and `cluster_ok_at` are the values to write on the
     board as they stand, so the monitor never has to compute a time.
@@ -457,6 +569,11 @@ def status(state, active=None):
                 last_ts=last.get("ts"),
             )
         offsets["hooks"][session] = end
+
+    if active is not None:
+        for session in active:
+            if session not in sessions:
+                sessions[session] = dict(open_items([]), changed=False, last_kind=None, last_ts=None)
 
     job_events = []
     try:
@@ -489,8 +606,14 @@ def status(state, active=None):
         clusters=clusters,
     )
     if active is not None:
-        rows = read_json(os.path.join(state, "monitor.json"), {}).get("rows", {})
+        stored_monitor = read_json(os.path.join(state, "monitor.json"), {})
+        rows = stored_monitor.get("rows", {})
+        set_asides = stored_monitor.get("setAside", {})
         report.update(compare_with_rows(active, rows))
+        for session, items in sessions.items():
+            items.update(
+                row_state(items, session in running, rows.get(session, {}), set_asides.get(session), active[session], clusters)
+            )
     return report
 
 
@@ -511,19 +634,23 @@ def compare_with_rows(active, rows):
 
 
 def parse_active(arguments):
-    """The `--active` arguments, each `<session id>=<lastActivityAt>`, as a dict.
+    """The `--active` arguments, each `<session id>=<lastActivityAt>=<isRunning as 0 or 1>`.
 
-    A bare id is refused: the time changes from wake to wake, so the monitor
-    has to write the arguments from a fresh session list and cannot repeat an
-    earlier command, which would keep a session that has since left.
+    Returns the sessions with their `lastActivityAt`, and the set of those
+    running. Anything shorter is refused: the time changes from wake to wake,
+    so the monitor has to write the arguments from a fresh session list and
+    cannot repeat an earlier command, which would keep a session that has
+    since left.
     """
-    active = {}
+    active, running = {}, set()
     for argument in arguments:
-        session, separator, activity = argument.partition("=")
-        if not (separator and activity and SESSION_ID.match(session)):
-            raise ValueError("%r is not <session id>=<lastActivityAt>" % argument)
-        active[session] = activity
-    return active
+        parts = argument.split("=")
+        if not (len(parts) == 3 and SESSION_ID.match(parts[0]) and parts[1] and parts[2] in ("0", "1")):
+            raise ValueError("%r is not <session id>=<lastActivityAt>=<0|1>" % argument)
+        active[parts[0]] = parts[1]
+        if parts[2] == "1":
+            running.add(parts[0])
+    return active, running
 
 
 def pending_changes(state):
@@ -548,10 +675,11 @@ def pending_changes(state):
 
 
 USAGE = """usage:
-  monitor_lib.py status <state-dir> [--active id=lastActivityAt ...]
+  monitor_lib.py status <state-dir> [--active id=lastActivityAt=isRunning ...]
         print the state as JSON and mark it seen; --active takes every session the monitor shows,
-        each with its lastActivityAt from the session list: the report covers them, says which
-        have departed, are new or have moved, and the watcher watches them
+        each with its lastActivityAt and isRunning (0 or 1) from the session list: the report
+        covers them, gives each its state, says which have departed, are new or have moved,
+        and the watcher watches them
   monitor_lib.py times                               print the board's stamp values for now, touching nothing
   monitor_lib.py pending <state-dir>                 print what changed since the last status
   monitor_lib.py record-jobs <state-dir> <context>   store a `kubectl get vcjob -o json` listing from stdin
@@ -561,11 +689,11 @@ USAGE = """usage:
 def main(argv):
     if len(argv) >= 3 and argv[1] == "status" and (len(argv) == 3 or argv[3] == "--active"):
         try:
-            active = parse_active(argv[4:]) if len(argv) > 3 else None
+            active, running = parse_active(argv[4:]) if len(argv) > 3 else (None, set())
         except ValueError as error:
             sys.stderr.write("status: %s\n%s" % (error, USAGE))
             return 2
-        json.dump(status(argv[2], active), sys.stdout, separators=(",", ":"))
+        json.dump(status(argv[2], active, running), sys.stdout, separators=(",", ":"))
         print()
     elif len(argv) >= 2 and argv[1] == "times":
         json.dump(times(), sys.stdout, separators=(",", ":"))
