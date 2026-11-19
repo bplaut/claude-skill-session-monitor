@@ -21,7 +21,7 @@ BOX_TOOL = "mcp__ccd_turn__wrap_up"
 
 # A background task finishing reaches the session as a prompt too. These are
 # the openings of such prompts; a prompt that starts with one is not the user.
-AUTOMATED_PROMPT_PREFIXES = ("<task-notification", "[SYSTEM NOTIFICATION", "<system-reminder")
+AUTOMATED_PROMPT_PREFIXES = ("<task-notification", "[SYSTEM NOTIFICATION", "<system-reminder", "<agent-message")
 
 FINISHED = "Completed"
 FAILED = ("Failed", "Aborted", "Terminated")

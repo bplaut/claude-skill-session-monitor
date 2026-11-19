@@ -141,6 +141,7 @@ class RecordFor(unittest.TestCase):
             "<task-notification>\n<task-id>b0</task-id>",
             "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated",
             "  <task-notification>",
+            '<agent-message from="a48f0075dce49089d"> [Subagent hand-back] The text below',
             "",
             None,
         ):
