@@ -63,7 +63,7 @@ those rules yourself:
   `run finished`: as in the table below.
 - `idle` with `why` `no closing message`: it has not ended a turn since the hook
   started keeping closing messages. `what` is `No closing message recorded yet.`
-- `read`: decide between `you` kind `hand-off`, `run` and `idle` from its
+- `read`: decide between `you` kind `hand-off`, `working`, `run` and `idle` from its
   `closing` (what it said as its last turn ended), or its `recap` when that is
   later. These are the only rows you decide.
 
@@ -76,7 +76,8 @@ The table defines every state, in the order the rules are tried.
 | `working` | It is mid-turn (see the rule below) | `Mid-turn.` |
 | `you`, kind `run finished` | It has recorded jobs (see below), and every one has ended or one has failed | `tell it: <job> finished at HH:MM`, or `failed at HH:MM`, or `ended at HH:MM, outcome unknown` for phase `Gone`. `then`: what it said to do next, in its words |
 | `you`, kind `hand-off` | Its closing message hands the user a command to run, and no evidence shows they ran it | `run: <the command, cut to 80 characters>` |
-| `run` | Its closing message says it is waiting on a job, download or eval | What the run is and where. `then`: `then you: <what the user does when it ends>` or `then nothing from you` |
+| `working`, between turns | Its closing message says it is waiting on helpers it started and will act on itself: subagents, or reviewers such as Codex in a review loop | `Between turns: waiting on <the helpers, e.g. 2 of 4 reviewers>.` No `then` |
+| `run` | Its closing message says it is waiting on a job, download, eval or CI run, whether or not the session started it in the background | What the run is and where. `then`: `then you: <what the user does when it ends>` or `then nothing from you` |
 | `idle` | None of the above | One short clause on where it stands |
 
 More rules:
